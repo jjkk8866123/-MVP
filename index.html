@@ -357,7 +357,7 @@ PCI: 58"></textarea>
       <p>請先載入含 GPS 座標（GPS_X / GPS_Y）的 CSV 資料</p>
     </div>
     <!-- 保固範圍圖控制列 -->
-    <div id="overlayCtrl" style="display:none;margin-bottom:8px;padding:8px 12px;background:#fffbe6;border:1px solid #ffe082;border-radius:6px">
+    <div id="overlayCtrl" style="margin-bottom:8px;padding:8px 12px;background:#fffbe6;border:1px solid #ffe082;border-radius:6px">
       <div class="d-flex align-items-center gap-3 flex-wrap" style="font-size:.8rem">
         <span style="font-weight:600;color:#7a5c00">🗺 保固範圍圖層</span>
         <label class="btn btn-sm btn-outline-warning py-0 px-2" style="cursor:pointer;font-size:.75rem">
@@ -1374,7 +1374,8 @@ function removeOverlay() {
   if (overlayLayer) { overlayLayer.remove(); overlayLayer = null; }
   overlayImgUrl = null;
   _storage.removeItem('overlayImgUrl');
-  document.getElementById('overlayCtrl').style.display = 'none';
+  // 清除後控制列仍保留（讓使用者可以重新上傳）
+  showToast('保固範圍圖已移除', 'info');
 }
 
 function renderMap() {
@@ -2095,7 +2096,14 @@ async function callGemini(query, topSegs) {
       }
     );
     const data = await res.json();
-    if (data.error) return null;
+    if (data.error) {
+      const code = data.error.status || '';
+      if (res.status === 429 || code === 'RESOURCE_EXHAUSTED')
+        return '⚠ API 用量已達上限，請稍等1分鐘後再試。（免費版：每分鐘15次 / 每天1,500次）';
+      if (res.status === 403 || code === 'PERMISSION_DENIED')
+        return '⚠ API Key 無效，請至「綜合查詢」頁籤重新輸入 Gemini API Key。';
+      return null;
+    }
     return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch(e) { return null; }
 }
@@ -2571,9 +2579,14 @@ function toggleChat() {
   }
 }
 
-document.getElementById('aiChatBtn').addEventListener('click', toggleChat);
-document.getElementById('aiChatInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatFromInput(); }
+// 機器人按鈕事件：等 DOM 完全載入後才綁定
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('aiChatBtn');
+  if (btn) btn.addEventListener('click', toggleChat);
+  const inp = document.getElementById('aiChatInput');
+  if (inp) inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatFromInput(); }
+  });
 });
 
 function appendChatBubble(role, text) {
@@ -2644,7 +2657,20 @@ async function sendChatMsg(userMsg) {
         body: JSON.stringify({ contents, generationConfig:{ maxOutputTokens:512, temperature:0.5 } }) }
     );
     const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+    if (data.error) {
+      const code = data.error.status || '';
+      const msg  = data.error.message || '';
+      let hint = '';
+      if (res.status === 429 || code === 'RESOURCE_EXHAUSTED')
+        hint = '⚠ API 用量已達上限（每分鐘15次 / 每天1,500次）。請稍等1分鐘後再試，或明天再使用。';
+      else if (res.status === 400 || code === 'INVALID_ARGUMENT')
+        hint = '⚠ API Key 格式錯誤，請重新確認 Gemini API Key 是否貼對。';
+      else if (res.status === 403 || code === 'PERMISSION_DENIED')
+        hint = '⚠ API Key 無效或已被停用，請至 Google AI Studio 重新產生。';
+      else
+        hint = `⚠ Gemini 發生錯誤（${res.status}）：${msg}`;
+      throw new Error(hint);
+    }
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '（無回應）';
     loadingBubble.innerHTML = '<span class="ai-icon">🤖</span>' +
       aiText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
