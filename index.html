@@ -225,6 +225,12 @@ PCI: 58"></textarea>
       <button class="btn btn-sm btn-outline-primary py-0 px-2" id="btnSaveGeminiQ" style="font-size:.78rem">
         <i class="fa fa-save me-1"></i>儲存
       </button>
+      <select id="geminiModel" class="form-select form-select-sm" style="width:auto;font-size:.78rem" title="選擇模型">
+        <option value="gemini-2.5-flash" selected>2.5 Flash ✅（您的帳號主模型）</option>
+        <option value="gemini-2.0-flash">2.0 Flash</option>
+        <option value="gemini-2.0-flash-lite">2.0 Flash Lite</option>
+        <option value="gemini-2.5-pro">2.5 Pro（高品質）</option>
+      </select>
       <span id="geminiKeyStatus" style="font-size:.75rem;color:#888"></span>
       <a href="https://aistudio.google.com/app/apikey" target="_blank"
          style="font-size:.75rem;color:#1a73e8;margin-left:auto">
@@ -372,6 +378,9 @@ PCI: 58"></textarea>
           <input type="range" id="overlayOpacity" min="10" max="90" value="50" style="width:80px">
           <span id="overlayOpacityVal">50%</span>
         </label>
+        <button id="overlayDragBtn" class="btn btn-sm btn-outline-info py-0 px-2" style="font-size:.75rem" onclick="toggleOverlayDrag()">
+          <i class="fa fa-up-down-left-right me-1"></i>拖曳定位
+        </button>
         <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem" onclick="toggleOverlayEditor()">
           <i class="fa fa-sliders me-1"></i>調整圖層
         </button>
@@ -1400,9 +1409,15 @@ function applyOverlayToMap() {
     opacity: getOverlayOpacity(), interactive: false
   }).addTo(mapInstance);
   document.getElementById('overlayCtrl').style.display = '';
-  // 圖片載入後套用旋轉/縮放
-  overlayLayer.once('load', applyOverlayTransform);
-  setTimeout(applyOverlayTransform, 100);
+  // 圖片載入後：套用旋轉/縮放，並若拖曳模式開啟則重新掛載事件
+  overlayLayer.once('load', () => {
+    applyOverlayTransform();
+    if (overlayDragMode) attachOverlayDragEvents();
+  });
+  setTimeout(() => {
+    applyOverlayTransform();
+    if (overlayDragMode) attachOverlayDragEvents();
+  }, 100);
 }
 
 function applyOverlayBounds() {
@@ -1473,11 +1488,132 @@ function shiftOverlay(dir) {
 }
 
 function removeOverlay() {
+  if (overlayDragMode) toggleOverlayDrag(); // 先關閉拖曳模式
   if (overlayLayer) { overlayLayer.remove(); overlayLayer = null; }
   overlayImgUrl = null;
   _storage.removeItem('overlayImgUrl');
-  // 清除後控制列仍保留（讓使用者可以重新上傳）
   showToast('保固範圍圖已移除', 'info');
+}
+
+// ── 拖曳定位 ──
+let overlayDragMode = false;
+let _odActive = false;
+let _odStartLatLng = null;
+let _odStartBounds = null;
+
+function toggleOverlayDrag() {
+  overlayDragMode = !overlayDragMode;
+  const btn = document.getElementById('overlayDragBtn');
+  if (overlayDragMode) {
+    btn.classList.replace('btn-outline-info', 'btn-info');
+    btn.innerHTML = '<i class="fa fa-hand me-1"></i>拖曳中（再按結束）';
+    if (mapInstance) mapInstance.dragging.disable();
+    attachOverlayDragEvents();
+    showToast('🖐 拖曳模式：在圖片上按住並拖動來移動圖片位置', 'info');
+  } else {
+    btn.classList.replace('btn-info', 'btn-outline-info');
+    btn.innerHTML = '<i class="fa fa-up-down-left-right me-1"></i>拖曳定位';
+    if (mapInstance) mapInstance.dragging.enable();
+    detachOverlayDragEvents();
+  }
+}
+
+function getOverlayImgEl() {
+  return overlayLayer && overlayLayer._image ? overlayLayer._image : null;
+}
+
+// 判斷點擊的 latlng 是否在目前圖層範圍內
+function _isPointInOverlay(latlng) {
+  if (!overlayBounds) return true;
+  const [[s, w], [n, e]] = overlayBounds;
+  return latlng.lat >= s && latlng.lat <= n && latlng.lng >= w && latlng.lng <= e;
+}
+
+// 改為監聽「地圖容器」— 避免 Leaflet 圖片 pointer-events:none 問題
+function attachOverlayDragEvents() {
+  if (!mapInstance) return;
+  const con = mapInstance.getContainer();
+  con.style.cursor = 'crosshair';
+  con.addEventListener('mousedown',  _odMouseDown);
+  con.addEventListener('touchstart', _odTouchStart, { passive: false });
+}
+
+function detachOverlayDragEvents() {
+  if (!mapInstance) return;
+  const con = mapInstance.getContainer();
+  con.style.cursor = '';
+  con.removeEventListener('mousedown',  _odMouseDown);
+  con.removeEventListener('touchstart', _odTouchStart);
+  document.removeEventListener('mousemove', _odMouseMove);
+  document.removeEventListener('mouseup',   _odMouseUp);
+  document.removeEventListener('touchmove', _odTouchMove);
+  document.removeEventListener('touchend',  _odMouseUp);
+  _odActive = false;
+}
+
+function _odMouseDown(e) {
+  if (!overlayDragMode) return;
+  const latlng = mapInstance.containerPointToLatLng(
+    mapInstance.mouseEventToContainerPoint(e));
+  if (!_isPointInOverlay(latlng)) return; // 點到圖片外，不攔截
+  e.preventDefault(); e.stopPropagation();
+  _odStartLatLng = latlng;
+  _odStartBounds = overlayBounds.map(b => [...b]);
+  _odActive = true;
+  mapInstance.getContainer().style.cursor = 'grabbing';
+  document.addEventListener('mousemove', _odMouseMove);
+  document.addEventListener('mouseup',   _odMouseUp);
+}
+
+function _odTouchStart(e) {
+  if (!overlayDragMode || !e.touches[0]) return;
+  const t = e.touches[0];
+  const latlng = mapInstance.containerPointToLatLng(
+    mapInstance.mouseEventToContainerPoint(t));
+  if (!_isPointInOverlay(latlng)) return;
+  e.preventDefault(); e.stopPropagation();
+  _odStartLatLng = latlng;
+  _odStartBounds = overlayBounds.map(b => [...b]);
+  _odActive = true;
+  document.addEventListener('touchmove', _odTouchMove, { passive: false });
+  document.addEventListener('touchend',  _odMouseUp);
+}
+
+function _odMouseMove(e) {
+  if (!_odActive) return;
+  const cur = mapInstance.containerPointToLatLng(
+    mapInstance.mouseEventToContainerPoint(e));
+  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+}
+
+function _odTouchMove(e) {
+  if (!_odActive || !e.touches[0]) return;
+  e.preventDefault();
+  const cur = mapInstance.containerPointToLatLng(
+    mapInstance.mouseEventToContainerPoint(e.touches[0]));
+  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+}
+
+function _odApplyDelta(dLat, dLng) {
+  const [[s0, w0], [n0, e0]] = _odStartBounds;
+  overlayBounds = [[s0 + dLat, w0 + dLng], [n0 + dLat, e0 + dLng]];
+  if (overlayLayer) overlayLayer.setBounds(overlayBounds); // 即時更新不重建
+  const fN = document.getElementById('obN'); if(fN) fN.value = (n0+dLat).toFixed(4);
+  const fS = document.getElementById('obS'); if(fS) fS.value = (s0+dLat).toFixed(4);
+  const fW = document.getElementById('obW'); if(fW) fW.value = (w0+dLng).toFixed(4);
+  const fE = document.getElementById('obE'); if(fE) fE.value = (e0+dLng).toFixed(4);
+}
+
+function _odMouseUp() {
+  if (!_odActive) return;
+  _odActive = false;
+  if (mapInstance) mapInstance.getContainer().style.cursor = 'crosshair';
+  document.removeEventListener('mousemove', _odMouseMove);
+  document.removeEventListener('mouseup',   _odMouseUp);
+  document.removeEventListener('touchmove', _odTouchMove);
+  document.removeEventListener('touchend',  _odMouseUp);
+  setTimeout(applyOverlayTransform, 30);
+  showToast('圖片位置已更新', 'success');
 }
 
 function renderMap() {
@@ -2185,9 +2321,10 @@ async function callGemini(query, topSegs) {
     `查詢：「${query}」\n\n資料（前5段）：\n${summary}\n` +
     `共 ${totalSegs} 段劣化，概估總費 ${Math.round(totalCost/10000)} 萬元`;
 
+  const geminiModel = document.getElementById('geminiModel')?.value || 'gemini-2.0-flash';
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2200,11 +2337,14 @@ async function callGemini(query, topSegs) {
     const data = await res.json();
     if (data.error) {
       const code = data.error.status || '';
+      const msg  = data.error.message || '';
       if (res.status === 429 || code === 'RESOURCE_EXHAUSTED')
-        return '⚠ API 用量已達上限，請稍等1分鐘後再試。（免費版：每分鐘15次 / 每天1,500次）';
+        return `⚠ 模型「${geminiModel}」用量達上限（HTTP 429）。請換其他模型或稍後再試。`;
+      if (res.status === 404 || code === 'NOT_FOUND')
+        return `⚠ 模型「${geminiModel}」不存在或您的 Key 無法存取。請換其他模型。`;
       if (res.status === 403 || code === 'PERMISSION_DENIED')
         return '⚠ API Key 無效，請至「綜合查詢」頁籤重新輸入 Gemini API Key。';
-      return null;
+      return `⚠ Gemini 錯誤（HTTP ${res.status} / ${code}）：${msg}`;
     }
     return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch(e) { return null; }
@@ -2596,6 +2736,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('geminiKeyStatus').innerHTML =
       '<span style="color:#16a34a"><i class="fa fa-check-circle me-1"></i>已儲存</span>';
   }
+  // 還原上次選擇的模型
+  const savedModel = _storage.getItem('geminiModel');
+  if (savedModel) {
+    const sel = document.getElementById('geminiModel');
+    if (sel) sel.value = savedModel;
+  }
+  // 模型切換時儲存
+  document.getElementById('geminiModel')?.addEventListener('change', function() {
+    _storage.setItem('geminiModel', this.value);
+    showToast(`已切換模型：${this.value}`, 'info');
+  });
   // 儲存按鈕
   document.getElementById('btnSaveGeminiQ').addEventListener('click', () => {
     const k = document.getElementById('geminiApiKey').value.trim();
@@ -2752,9 +2903,10 @@ async function sendChatMsg(userMsg) {
   // 本次訊息
   contents.push({ role:'user', parts:[{ text: userMsg }] });
 
+  const geminiModel = document.getElementById('geminiModel')?.value || 'gemini-2.0-flash';
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`,
       { method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ contents, generationConfig:{ maxOutputTokens:512, temperature:0.5 } }) }
     );
@@ -2764,13 +2916,15 @@ async function sendChatMsg(userMsg) {
       const msg  = data.error.message || '';
       let hint = '';
       if (res.status === 429 || code === 'RESOURCE_EXHAUSTED')
-        hint = '⚠ API 用量已達上限（每分鐘15次 / 每天1,500次）。請稍等1分鐘後再試，或明天再使用。';
+        hint = `⚠ 模型「${geminiModel}」用量達上限（HTTP 429）。\n請切換其他模型（頁面頂端模型選單），或稍等後再試。`;
+      else if (res.status === 404 || code === 'NOT_FOUND')
+        hint = `⚠ 模型「${geminiModel}」不可用（HTTP 404）。\n請切換到其他模型（頁面頂端模型選單）。`;
       else if (res.status === 400 || code === 'INVALID_ARGUMENT')
-        hint = '⚠ API Key 格式錯誤，請重新確認 Gemini API Key 是否貼對。';
+        hint = `⚠ API Key 格式錯誤（HTTP 400）：${msg}`;
       else if (res.status === 403 || code === 'PERMISSION_DENIED')
         hint = '⚠ API Key 無效或已被停用，請至 Google AI Studio 重新產生。';
       else
-        hint = `⚠ Gemini 發生錯誤（${res.status}）：${msg}`;
+        hint = `⚠ Gemini 錯誤（HTTP ${res.status} / ${code}）：${msg}`;
       throw new Error(hint);
     }
     const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '（無回應）';
