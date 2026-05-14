@@ -78,6 +78,40 @@ body { background:#f0f2f7; font-family:'Microsoft JhengHei',Arial,sans-serif; fo
 .map-banner { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:1000;
   padding:6px 16px; border-radius:20px; font-size:.8rem; font-weight:600; color:#fff;
   box-shadow:0 2px 10px rgba(0,0,0,.3); white-space:nowrap; cursor:pointer; }
+
+/* ── AI 客服精靈 ── */
+#aiChatBtn {
+  position:fixed;right:20px;bottom:20px;width:56px;height:56px;
+  border-radius:50%;background:#00388a;color:#fff;border:none;
+  box-shadow:0 4px 12px rgba(0,0,0,.3);cursor:pointer;z-index:9000;
+  font-size:1.4rem;transition:.2s;
+}
+#aiChatBtn:hover { transform:scale(1.1); background:#0050c0; }
+#aiChatBadge {
+  position:absolute;top:-3px;right:-3px;width:14px;height:14px;
+  background:#e53935;border-radius:50%;border:2px solid #fff;
+}
+#aiChatPanel {
+  position:fixed;right:20px;bottom:88px;width:360px;height:500px;
+  background:#fff;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.18);
+  display:flex;flex-direction:column;z-index:9000;overflow:hidden;
+  transition:.25s;transform-origin:bottom right;
+}
+#aiChatPanel.hidden { transform:scale(0.05);opacity:0;pointer-events:none; }
+#aiChatHeader {
+  background:#00388a;color:#fff;padding:12px 16px;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+#aiChatMsgs {
+  flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;
+  background:#f5f7fb;
+}
+.chat-bubble { max-width:80%;padding:8px 12px;border-radius:12px;font-size:.82rem;line-height:1.5;word-break:break-word; }
+.chat-bubble.user { background:#00388a;color:#fff;align-self:flex-end;border-bottom-right-radius:3px; }
+.chat-bubble.ai { background:#fff;color:#333;align-self:flex-start;border-bottom-left-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,.1); }
+.chat-bubble.ai .ai-icon { font-size:.9rem;margin-right:4px; }
+#aiChatQuick { padding:6px 10px;border-top:1px solid #eee;display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0;background:#fff; }
+#aiChatInputRow { padding:8px 10px;border-top:1px solid #eee;display:flex;gap:6px;align-items:center;flex-shrink:0;background:#fff; }
 </style>
 </head>
 <body>
@@ -322,6 +356,40 @@ PCI: 58"></textarea>
       <i class="fa fa-map fa-3x d-block mb-3 opacity-25"></i>
       <p>請先載入含 GPS 座標（GPS_X / GPS_Y）的 CSV 資料</p>
     </div>
+    <!-- 保固範圍圖控制列 -->
+    <div id="overlayCtrl" style="display:none;margin-bottom:8px;padding:8px 12px;background:#fffbe6;border:1px solid #ffe082;border-radius:6px">
+      <div class="d-flex align-items-center gap-3 flex-wrap" style="font-size:.8rem">
+        <span style="font-weight:600;color:#7a5c00">🗺 保固範圍圖層</span>
+        <label class="btn btn-sm btn-outline-warning py-0 px-2" style="cursor:pointer;font-size:.75rem">
+          <i class="fa fa-upload me-1"></i>上傳圖片
+          <input type="file" id="overlayImgInput" accept="image/*" style="display:none">
+        </label>
+        <label class="d-flex align-items-center gap-1">
+          <input type="checkbox" id="overlayVisible" checked> 顯示圖層
+        </label>
+        <label class="d-flex align-items-center gap-1">
+          透明度：
+          <input type="range" id="overlayOpacity" min="10" max="90" value="50" style="width:80px">
+          <span id="overlayOpacityVal">50%</span>
+        </label>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem" onclick="showOverlayBoundsEditor()">
+          <i class="fa fa-crop me-1"></i>調整邊界
+        </button>
+        <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:.75rem" onclick="removeOverlay()">移除</button>
+      </div>
+      <!-- 邊界調整（預設隱藏） -->
+      <div id="overlayBoundsEditor" style="display:none;margin-top:8px;padding:8px;background:#fff;border-radius:4px;font-size:.75rem">
+        <div class="row g-2">
+          <div class="col-6"><label>北（緯度上界）<input type="number" class="form-control form-control-sm" id="obN" step="0.001" value="25.025"></label></div>
+          <div class="col-6"><label>南（緯度下界）<input type="number" class="form-control form-control-sm" id="obS" step="0.001" value="24.999"></label></div>
+          <div class="col-6"><label>西（經度左界）<input type="number" class="form-control form-control-sm" id="obW" step="0.001" value="121.192"></label></div>
+          <div class="col-6"><label>東（經度右界）<input type="number" class="form-control form-control-sm" id="obE" step="0.001" value="121.238"></label></div>
+        </div>
+        <button class="btn btn-sm btn-primary mt-2" onclick="applyOverlayBounds()">套用邊界</button>
+        <span style="color:#888;margin-left:8px">調整後圖片會重新定位</span>
+      </div>
+    </div>
+
     <div id="mapContainer" style="display:none;position:relative">
       <div id="mapBanner" class="map-banner" style="display:none" onclick="clearMapHighlight()"></div>
       <div id="leafletMap" style="height:540px;border-radius:6px;z-index:0"></div>
@@ -944,18 +1012,25 @@ function filterAndSort(segs, query) {
   const q = query.toLowerCase();
   let result = [...segs];
 
-  // 道路名稱篩選
-  const roadM = query.match(/[一-鿿\w]+(路|街|道|巷|大道|段)/);
-  if (roadM) result = result.filter(s => s.roadName.includes(roadM[0]));
+  // 道路名稱篩選：只有當比對到的名稱確實存在於資料中才篩選
+  const roadM = query.match(/[一-鿿\w]+(路|街|道|巷|大道|段)/g) || [];
+  for (const candidate of roadM) {
+    const matched = result.filter(s => s.roadName.includes(candidate));
+    if (matched.length > 0) {          // 確認有實際路段才套用
+      result = matched;
+      break;
+    }
+    // 否則跳過這個候選（可能是「哪路路段」「道路品質」等非路名詞彙）
+  }
 
   // 排序覆蓋
-  if (q.includes('連續') || q.includes('長')) {
+  if (q.includes('連續') || q.includes('最長')) {
     result.sort((a, b) => b.length - a.length);
   } else if (q.includes('iri')) {
     result.sort((a, b) => b.maxIRI - a.maxIRI);
   } else if (q.includes('pci')) {
     result.sort((a, b) => a.minPCI - b.minPCI);
-  } else if (q.includes('費用') || q.includes('錢')) {
+  } else if (q.includes('費用') || q.includes('錢') || q.includes('概算')) {
     result.sort((a, b) => b.costInfo.total - a.costInfo.total);
   }
 
@@ -1230,6 +1305,78 @@ function togglePileDetails(idx) {
 let mapInstance  = null;
 let mapLayerGroup = null;
 
+// ── 保固範圍圖疊圖 ──
+let overlayLayer = null;
+let overlayImgUrl = null;
+let overlayBounds = [[24.999, 121.192], [25.025, 121.238]]; // SW, NE
+
+function initOverlayControls() {
+  const inp = document.getElementById('overlayImgInput');
+  if (!inp) return;
+  inp.addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      overlayImgUrl = e.target.result;
+      _storage.setItem('overlayImgUrl', overlayImgUrl);
+      applyOverlayToMap();
+      document.getElementById('overlayCtrl').style.display = '';
+    };
+    reader.readAsDataURL(file);
+  });
+  document.getElementById('overlayVisible').addEventListener('change', function() {
+    if (overlayLayer) overlayLayer.setOpacity(this.checked ? getOverlayOpacity() : 0);
+  });
+  document.getElementById('overlayOpacity').addEventListener('input', function() {
+    document.getElementById('overlayOpacityVal').textContent = this.value + '%';
+    if (overlayLayer && document.getElementById('overlayVisible').checked)
+      overlayLayer.setOpacity(this.value / 100);
+  });
+  // 還原上次圖片
+  const saved = _storage.getItem('overlayImgUrl');
+  if (saved) {
+    overlayImgUrl = saved;
+    document.getElementById('overlayCtrl').style.display = '';
+  }
+}
+
+function getOverlayOpacity() {
+  return (document.getElementById('overlayOpacity')?.value || 50) / 100;
+}
+
+function applyOverlayToMap() {
+  if (!mapInstance || !overlayImgUrl) return;
+  if (overlayLayer) { overlayLayer.remove(); overlayLayer = null; }
+  overlayLayer = L.imageOverlay(overlayImgUrl, overlayBounds, {
+    opacity: getOverlayOpacity(), interactive: false
+  }).addTo(mapInstance);
+  document.getElementById('overlayCtrl').style.display = '';
+}
+
+function applyOverlayBounds() {
+  const n = parseFloat(document.getElementById('obN').value);
+  const s = parseFloat(document.getElementById('obS').value);
+  const w = parseFloat(document.getElementById('obW').value);
+  const e2 = parseFloat(document.getElementById('obE').value);
+  if (isNaN(n)||isNaN(s)||isNaN(w)||isNaN(e2)) return alert('請輸入有效數字');
+  overlayBounds = [[s, w], [n, e2]];
+  applyOverlayToMap();
+  showToast('邊界已更新', 'success');
+}
+
+function showOverlayBoundsEditor() {
+  const ed = document.getElementById('overlayBoundsEditor');
+  ed.style.display = ed.style.display === 'none' ? '' : 'none';
+}
+
+function removeOverlay() {
+  if (overlayLayer) { overlayLayer.remove(); overlayLayer = null; }
+  overlayImgUrl = null;
+  _storage.removeItem('overlayImgUrl');
+  document.getElementById('overlayCtrl').style.display = 'none';
+}
+
 function renderMap() {
   const cfg    = getConfig();
   const noGPS  = document.getElementById('mapNoGPS');
@@ -1254,9 +1401,13 @@ function renderMap() {
       maxZoom: 19
     }).addTo(mapInstance);
     mapLayerGroup = L.layerGroup().addTo(mapInstance);
+    // 套用已儲存的保固範圍圖
+    if (overlayImgUrl) applyOverlayToMap();
   } else {
     mapInstance.invalidateSize();
     mapLayerGroup.clearLayers();
+    // 重新套用（避免圖層遺失）
+    if (overlayImgUrl && !overlayLayer) applyOverlayToMap();
   }
 
   // 三色規定：IRI且PCI雙超標→紫紅 / 單超標→黃 / 都正常→綠
@@ -1348,6 +1499,7 @@ function focusMapOnSegment(segIdx) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initOverlayControls();
   // ── Offcanvas 拖曳調整寬度 ──
   (function() {
     const handle = document.getElementById('ocResizeHandle');
@@ -2404,6 +2556,130 @@ document.addEventListener('DOMContentLoaded', () => {
 
   renderWarrantyTable();
 });
+
+// ── AI 客服精靈 ──
+let chatHistory = [];
+let chatOpen = false;
+
+function toggleChat() {
+  chatOpen = !chatOpen;
+  const panel = document.getElementById('aiChatPanel');
+  panel.classList.toggle('hidden', !chatOpen);
+  document.getElementById('aiChatBadge').style.display = 'none';
+  if (chatOpen && document.getElementById('aiChatMsgs').children.length === 0) {
+    appendChatBubble('ai', '您好！我是東利 AI 助理 🤖\n我可以回答道路品質分析相關問題，例如：\n• 目前最差的路段\n• 工法建議與費用說明\n• IRI / PCI 判讀方式\n• 系統操作說明\n\n請問有什麼需要幫忙的？');
+  }
+}
+
+document.getElementById('aiChatBtn').addEventListener('click', toggleChat);
+document.getElementById('aiChatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatFromInput(); }
+});
+
+function appendChatBubble(role, text) {
+  const msgs = document.getElementById('aiChatMsgs');
+  const div = document.createElement('div');
+  div.className = `chat-bubble ${role}`;
+  div.innerHTML = (role==='ai' ? '<span class="ai-icon">🤖</span>' : '') +
+    text.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+  return div;
+}
+
+function sendChatFromInput() {
+  const inp = document.getElementById('aiChatInput');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  sendChatMsg(msg);
+}
+
+function getChatContext() {
+  if (!window.segments || segments.length === 0) return '';
+  const cfg = typeof getConfig === 'function' ? getConfig() : {};
+  const top3 = [...segments].sort((a,b) => b.score - a.score).slice(0,3);
+  return `\n\n目前載入資料：共 ${(window.piles||[]).length} 筆樁位，${segments.length} 段劣化路段。\n` +
+    `前3段：\n` + top3.map((s,i) =>
+      `${i+1}. ${s.roadName} [${s.project||'—'}] 車道${(s.allLanes||[s.lane]).join('+')} ` +
+      `${s.startPos}~${s.endPos}m, IRI:${s.maxIRI.toFixed(2)}, PCI:${s.minPCI}`
+    ).join('\n');
+}
+
+async function sendChatMsg(userMsg) {
+  if (!chatOpen) toggleChat();
+  appendChatBubble('user', userMsg);
+
+  const key = document.getElementById('geminiApiKey').value.trim() || _storage.getItem('geminiApiKey');
+  if (!key) {
+    appendChatBubble('ai', '請先在「綜合查詢」頁籤頂端設定 Gemini API Key，才能使用 AI 功能。');
+    return;
+  }
+
+  const loadingBubble = appendChatBubble('ai', '⏳ 思考中...');
+
+  const systemText = `你是東利工程的道路品質分析助理，負責輔助工程人員了解道路維護決策。
+背景知識：
+- IRI（國際粗糙度指數）：越高越不平整，門檻 4.2，超過視為異常。
+- PCI（路面狀況指數）：0-100，越低越差，門檻 70，低於視為異常。
+- 顏色：綠=IRI≤4.2且PCI≥70（正常）、黃=單超標、紫紅=雙超標。
+- 工法：薄層加鋪（輕度）、銑鋪5cm（中度）、路基改善加銑鋪（重度）、坑洞填補（緊急）。
+- 保固期：刨鋪路段有5年保固，期內應向承包商申請維修。
+請用繁體中文，語氣專業親切，每次約100-200字。${getChatContext()}`;
+
+  // 建立 contents 陣列（含歷史）
+  const contents = [];
+  // system 以 user 角色加入（Gemini 不支援 system role）
+  contents.push({ role:'user', parts:[{ text: systemText }] });
+  contents.push({ role:'model', parts:[{ text:'好的，我了解，請問有什麼需要協助的？' }] });
+  // 歷史對話（最近10輪）
+  chatHistory.slice(-10).forEach(h => contents.push(h));
+  // 本次訊息
+  contents.push({ role:'user', parts:[{ text: userMsg }] });
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+      { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ contents, generationConfig:{ maxOutputTokens:512, temperature:0.5 } }) }
+    );
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '（無回應）';
+    loadingBubble.innerHTML = '<span class="ai-icon">🤖</span>' +
+      aiText.replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    // 儲存對話歷史
+    chatHistory.push({ role:'user', parts:[{ text:userMsg }] });
+    chatHistory.push({ role:'model', parts:[{ text:aiText }] });
+    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+  } catch(e) {
+    loadingBubble.innerHTML = `<span class="ai-icon">🤖</span>⚠ 發生錯誤：${e.message}`;
+  }
+}
 </script>
+
+<!-- AI 客服精靈 -->
+<button id="aiChatBtn" title="AI 助理">
+  <i class="fa fa-robot"></i>
+  <div id="aiChatBadge"></div>
+</button>
+
+<div id="aiChatPanel" class="hidden">
+  <div id="aiChatHeader">
+    <span><i class="fa fa-robot me-2"></i>東利 AI 助理</span>
+    <button onclick="toggleChat()" style="background:none;border:none;color:#fff;font-size:1.1rem">✕</button>
+  </div>
+  <div id="aiChatQuick">
+    <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('目前最差路段？')">最差路段？</button>
+    <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('保固期快到的路段有哪些？')">保固到期？</button>
+    <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('這個系統怎麼使用？')">系統說明</button>
+  </div>
+  <div id="aiChatMsgs"></div>
+  <div id="aiChatInputRow">
+    <input id="aiChatInput" type="text" class="form-control form-control-sm" placeholder="輸入問題...（Enter 送出）">
+    <button class="btn btn-primary btn-sm px-3" onclick="sendChatFromInput()"><i class="fa fa-paper-plane"></i></button>
+  </div>
+  <div style="text-align:center;padding:3px;font-size:.65rem;color:#bbb;background:#fff">Powered by Google Gemini</div>
+</div>
 </body>
 </html>
