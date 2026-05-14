@@ -226,11 +226,15 @@ PCI: 58"></textarea>
         <i class="fa fa-save me-1"></i>儲存
       </button>
       <select id="geminiModel" class="form-select form-select-sm" style="width:auto;font-size:.78rem" title="選擇模型">
-        <option value="gemini-2.5-flash" selected>2.5 Flash ✅（您的帳號主模型）</option>
+        <option value="gemini-2.5-flash" selected>2.5 Flash（您的帳號主模型）</option>
         <option value="gemini-2.0-flash">2.0 Flash</option>
         <option value="gemini-2.0-flash-lite">2.0 Flash Lite</option>
         <option value="gemini-2.5-pro">2.5 Pro（高品質）</option>
       </select>
+      <label class="d-flex align-items-center gap-1 ms-2" style="font-size:.78rem;cursor:pointer" title="關閉後查詢不會呼叫 AI，節省 API 用量">
+        <input type="checkbox" id="geminiEnabled" checked>
+        <span>啟用 AI 分析</span>
+      </label>
       <span id="geminiKeyStatus" style="font-size:.75rem;color:#888"></span>
       <a href="https://aistudio.google.com/app/apikey" target="_blank"
          style="font-size:.75rem;color:#1a73e8;margin-left:auto">
@@ -1495,11 +1499,15 @@ function removeOverlay() {
   showToast('保固範圍圖已移除', 'info');
 }
 
-// ── 拖曳定位 ──
+// ── 拖曳定位（使用 Leaflet 事件系統，確保優先於底圖）──
 let overlayDragMode = false;
 let _odActive = false;
 let _odStartLatLng = null;
 let _odStartBounds = null;
+
+function getOverlayImgEl() {
+  return overlayLayer && overlayLayer._image ? overlayLayer._image : null;
+}
 
 function toggleOverlayDrag() {
   overlayDragMode = !overlayDragMode;
@@ -1507,113 +1515,112 @@ function toggleOverlayDrag() {
   if (overlayDragMode) {
     btn.classList.replace('btn-outline-info', 'btn-info');
     btn.innerHTML = '<i class="fa fa-hand me-1"></i>拖曳中（再按結束）';
-    if (mapInstance) mapInstance.dragging.disable();
     attachOverlayDragEvents();
-    showToast('🖐 拖曳模式：在圖片上按住並拖動來移動圖片位置', 'info');
+    showToast('🖐 拖曳模式已開啟：在地圖上按住拖動即可移動圖片', 'info');
   } else {
     btn.classList.replace('btn-info', 'btn-outline-info');
     btn.innerHTML = '<i class="fa fa-up-down-left-right me-1"></i>拖曳定位';
-    if (mapInstance) mapInstance.dragging.enable();
     detachOverlayDragEvents();
   }
 }
 
-function getOverlayImgEl() {
-  return overlayLayer && overlayLayer._image ? overlayLayer._image : null;
-}
-
-// 判斷點擊的 latlng 是否在目前圖層範圍內
-function _isPointInOverlay(latlng) {
-  if (!overlayBounds) return true;
-  const [[s, w], [n, e]] = overlayBounds;
-  return latlng.lat >= s && latlng.lat <= n && latlng.lng >= w && latlng.lng <= e;
-}
-
-// 改為監聽「地圖容器」— 避免 Leaflet 圖片 pointer-events:none 問題
 function attachOverlayDragEvents() {
   if (!mapInstance) return;
-  const con = mapInstance.getContainer();
-  con.style.cursor = 'crosshair';
-  con.addEventListener('mousedown',  _odMouseDown);
-  con.addEventListener('touchstart', _odTouchStart, { passive: false });
+  // 停用 Leaflet 所有互動，讓我們完全接管
+  mapInstance.dragging.disable();
+  mapInstance.scrollWheelZoom.disable();
+  mapInstance.doubleClickZoom.disable();
+  mapInstance.touchZoom.disable();
+  mapInstance.getContainer().style.cursor = 'grab';
+  // 使用 Leaflet 事件系統（mousedown 在 Leaflet 層，有正確的 latlng）
+  mapInstance.on('mousedown', _odLeafletDown);
+  // 觸控支援（原生 DOM）
+  mapInstance.getContainer().addEventListener('touchstart', _odTouchStart, { passive: false });
 }
 
 function detachOverlayDragEvents() {
   if (!mapInstance) return;
-  const con = mapInstance.getContainer();
-  con.style.cursor = '';
-  con.removeEventListener('mousedown',  _odMouseDown);
-  con.removeEventListener('touchstart', _odTouchStart);
-  document.removeEventListener('mousemove', _odMouseMove);
-  document.removeEventListener('mouseup',   _odMouseUp);
+  // 恢復 Leaflet 互動
+  mapInstance.dragging.enable();
+  mapInstance.scrollWheelZoom.enable();
+  mapInstance.doubleClickZoom.enable();
+  mapInstance.touchZoom.enable();
+  mapInstance.getContainer().style.cursor = '';
+  mapInstance.off('mousedown', _odLeafletDown);
+  mapInstance.off('mousemove', _odLeafletMove);
+  mapInstance.off('mouseup',   _odLeafletUp);
+  mapInstance.getContainer().removeEventListener('touchstart', _odTouchStart);
   document.removeEventListener('touchmove', _odTouchMove);
-  document.removeEventListener('touchend',  _odMouseUp);
+  document.removeEventListener('touchend',  _odTouchEnd);
   _odActive = false;
 }
 
-function _odMouseDown(e) {
-  if (!overlayDragMode) return;
-  const latlng = mapInstance.containerPointToLatLng(
-    mapInstance.mouseEventToContainerPoint(e));
-  if (!_isPointInOverlay(latlng)) return; // 點到圖片外，不攔截
-  e.preventDefault(); e.stopPropagation();
-  _odStartLatLng = latlng;
-  _odStartBounds = overlayBounds.map(b => [...b]);
-  _odActive = true;
+// Leaflet mousedown：e.latlng 是已換算的地圖座標，不需手動換算
+function _odLeafletDown(e) {
+  L.DomEvent.stopPropagation(e); // 阻止 Leaflet 底圖處理
+  _odStartLatLng  = e.latlng;
+  _odStartBounds  = overlayBounds.map(b => [...b]);
+  _odActive       = true;
   mapInstance.getContainer().style.cursor = 'grabbing';
-  document.addEventListener('mousemove', _odMouseMove);
-  document.addEventListener('mouseup',   _odMouseUp);
+  mapInstance.on('mousemove', _odLeafletMove);
+  mapInstance.on('mouseup',   _odLeafletUp);
 }
 
+function _odLeafletMove(e) {
+  if (!_odActive) return;
+  _odApplyDelta(e.latlng.lat - _odStartLatLng.lat, e.latlng.lng - _odStartLatLng.lng);
+}
+
+function _odLeafletUp(e) {
+  if (!_odActive) return;
+  _odActive = false;
+  mapInstance.getContainer().style.cursor = 'grab';
+  mapInstance.off('mousemove', _odLeafletMove);
+  mapInstance.off('mouseup',   _odLeafletUp);
+  setTimeout(applyOverlayTransform, 30);
+  showToast('圖片位置已更新 ✅', 'success');
+}
+
+// 觸控支援
 function _odTouchStart(e) {
   if (!overlayDragMode || !e.touches[0]) return;
-  const t = e.touches[0];
-  const latlng = mapInstance.containerPointToLatLng(
-    mapInstance.mouseEventToContainerPoint(t));
-  if (!_isPointInOverlay(latlng)) return;
-  e.preventDefault(); e.stopPropagation();
-  _odStartLatLng = latlng;
+  e.preventDefault();
+  const pt = mapInstance.containerPointToLatLng(
+    L.point(e.touches[0].clientX - mapInstance.getContainer().getBoundingClientRect().left,
+            e.touches[0].clientY - mapInstance.getContainer().getBoundingClientRect().top));
+  _odStartLatLng = pt;
   _odStartBounds = overlayBounds.map(b => [...b]);
   _odActive = true;
   document.addEventListener('touchmove', _odTouchMove, { passive: false });
-  document.addEventListener('touchend',  _odMouseUp);
-}
-
-function _odMouseMove(e) {
-  if (!_odActive) return;
-  const cur = mapInstance.containerPointToLatLng(
-    mapInstance.mouseEventToContainerPoint(e));
-  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+  document.addEventListener('touchend',  _odTouchEnd);
 }
 
 function _odTouchMove(e) {
   if (!_odActive || !e.touches[0]) return;
   e.preventDefault();
-  const cur = mapInstance.containerPointToLatLng(
-    mapInstance.mouseEventToContainerPoint(e.touches[0]));
-  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+  const rect = mapInstance.getContainer().getBoundingClientRect();
+  const pt = mapInstance.containerPointToLatLng(
+    L.point(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top));
+  _odApplyDelta(pt.lat - _odStartLatLng.lat, pt.lng - _odStartLatLng.lng);
+}
+
+function _odTouchEnd() {
+  if (!_odActive) return;
+  _odActive = false;
+  document.removeEventListener('touchmove', _odTouchMove);
+  document.removeEventListener('touchend',  _odTouchEnd);
+  setTimeout(applyOverlayTransform, 30);
+  showToast('圖片位置已更新 ✅', 'success');
 }
 
 function _odApplyDelta(dLat, dLng) {
   const [[s0, w0], [n0, e0]] = _odStartBounds;
   overlayBounds = [[s0 + dLat, w0 + dLng], [n0 + dLat, e0 + dLng]];
-  if (overlayLayer) overlayLayer.setBounds(overlayBounds); // 即時更新不重建
+  if (overlayLayer) overlayLayer.setBounds(overlayBounds);
   const fN = document.getElementById('obN'); if(fN) fN.value = (n0+dLat).toFixed(4);
   const fS = document.getElementById('obS'); if(fS) fS.value = (s0+dLat).toFixed(4);
   const fW = document.getElementById('obW'); if(fW) fW.value = (w0+dLng).toFixed(4);
   const fE = document.getElementById('obE'); if(fE) fE.value = (e0+dLng).toFixed(4);
-}
-
-function _odMouseUp() {
-  if (!_odActive) return;
-  _odActive = false;
-  if (mapInstance) mapInstance.getContainer().style.cursor = 'crosshair';
-  document.removeEventListener('mousemove', _odMouseMove);
-  document.removeEventListener('mouseup',   _odMouseUp);
-  document.removeEventListener('touchmove', _odTouchMove);
-  document.removeEventListener('touchend',  _odMouseUp);
-  setTimeout(applyOverlayTransform, 30);
-  showToast('圖片位置已更新', 'success');
 }
 
 function renderMap() {
@@ -2445,7 +2452,8 @@ async function doAnalyze() {
   aiBox.innerHTML = buildBasicSummary() || `<span style="color:#888;font-size:.8rem">無劣化路段</span>`;
 
   // 有 AI key 且有查詢關鍵字 → 再補 AI 建議
-  if (query && filtered.length && (geminiKey || claudeKey)) {
+  const aiEnabled = document.getElementById('geminiEnabled')?.checked !== false;
+  if (aiEnabled && query && filtered.length && (geminiKey || claudeKey)) {
     aiBox.innerHTML += `<hr style="margin:6px 0"><i class="fa fa-spinner fa-spin me-1" style="font-size:.75rem"></i><span style="font-size:.75rem;color:#888">Gemini 分析中...</span>`;
     let aiText = null, provider = '';
     if (geminiKey) { aiText = await callGemini(query, filtered); provider = '🟢 Gemini'; }
@@ -2862,14 +2870,57 @@ function sendChatFromInput() {
 }
 
 function getChatContext() {
-  if (!window.segments || segments.length === 0) return '';
+  if (!window.segments || segments.length === 0) return '\n\n（目前尚未載入任何路段資料，請先在「資料輸入」頁面上傳 CSV 檔案。）';
   const cfg = typeof getConfig === 'function' ? getConfig() : {};
-  const top3 = [...segments].sort((a,b) => b.score - a.score).slice(0,3);
-  return `\n\n目前載入資料：共 ${(window.piles||[]).length} 筆樁位，${segments.length} 段劣化路段。\n` +
-    `前3段：\n` + top3.map((s,i) =>
-      `${i+1}. ${s.roadName} [${s.project||'—'}] 車道${(s.allLanes||[s.lane]).join('+')} ` +
-      `${s.startPos}~${s.endPos}m, IRI:${s.maxIRI.toFixed(2)}, PCI:${s.minPCI}`
-    ).join('\n');
+  const iriThr = cfg.iriThreshold ?? 4.2;
+  const pciThr = cfg.pciThreshold ?? 70;
+
+  // 依嚴重程度排序
+  const sorted = [...segments].sort((a,b) => {
+    const aScore = (a.maxIRI > iriThr ? 2 : 0) + (a.minPCI < pciThr ? 2 : 0);
+    const bScore = (b.maxIRI > iriThr ? 2 : 0) + (b.minPCI < pciThr ? 2 : 0);
+    if (bScore !== aScore) return bScore - aScore;
+    return (b.maxIRI||0) - (a.maxIRI||0);
+  });
+
+  // 統計
+  const critical = sorted.filter(s => s.maxIRI > iriThr && s.minPCI < pciThr).length;
+  const mid      = sorted.filter(s => (s.maxIRI > iriThr) !== (s.minPCI < pciThr)).length;
+  const totalCost = sorted.reduce((sum, s) => sum + (s.cost||0), 0);
+  const totalLen  = sorted.reduce((sum, s) => sum + ((s.endPos||0)-(s.startPos||0)), 0);
+
+  // 保固資訊
+  let warrantyNote = '';
+  try {
+    const wa = getWarrantyAreas ? getWarrantyAreas() : [];
+    if (wa.length > 0) {
+      const inW = sorted.filter(s => isSegInWarranty && isSegInWarranty(s));
+      if (inW.length > 0)
+        warrantyNote = `\n保固路段（5年保固內，應向承包商申請維修，不需自費）：${inW.map(s=>s.roadName).join('、')} 共${inW.length}段。`;
+    }
+  } catch(e) {}
+
+  // 前15段詳細資料
+  const top15 = sorted.slice(0, 15).map((s, i) => {
+    const status = (s.maxIRI > iriThr && s.minPCI < pciThr) ? '雙超標' :
+                   (s.maxIRI > iriThr || s.minPCI < pciThr) ? '單超標' : '正常';
+    const cost = s.cost ? `${Math.round(s.cost/10000)}萬元` : '未估';
+    const len  = Math.round((s.endPos||0) - (s.startPos||0));
+    return `${i+1}. ${s.roadName} 車道${(s.allLanes||[s.lane]).join('+')} ` +
+           `${s.startPos}~${s.endPos}m(${len}m) IRI:${(s.maxIRI||0).toFixed(1)} PCI:${s.minPCI||'—'} ` +
+           `[${status}] 工法:${s.method||'未定'} 費用:${cost}`;
+  }).join('\n');
+
+  return `\n\n【系統目前載入資料】
+路段總覽：共 ${sorted.length} 段劣化路段，總長 ${Math.round(totalLen)}m，概估總費 ${Math.round(totalCost/10000)} 萬元
+嚴重程度：雙超標(紫紅) ${critical} 段、單超標(黃) ${mid} 段${warrantyNote}
+IRI門檻：${iriThr}，PCI門檻：${pciThr}
+
+各路段明細（依嚴重程度排序）：
+${top15}
+${sorted.length > 15 ? `（另有 ${sorted.length-15} 段省略）` : ''}
+
+請依上述資料直接回答使用者問題，例如預算分析時請計算各段費用並列出優先順序。`;
 }
 
 async function sendChatMsg(userMsg) {
@@ -2940,8 +2991,8 @@ async function sendChatMsg(userMsg) {
 }
 </script>
 
-<!-- AI 客服精靈 -->
-<button id="aiChatBtn" title="AI 助理">
+<!-- AI 客服精靈（暫時隱藏，待 API 額度確認後可移除 display:none）-->
+<button id="aiChatBtn" title="AI 助理" style="display:none">
   <i class="fa fa-robot"></i>
   <div id="aiChatBadge"></div>
 </button>
