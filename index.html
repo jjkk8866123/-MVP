@@ -287,13 +287,13 @@ PCI: 58"></textarea>
       <div class="panel-title mb-0">樁位地圖</div>
       <div class="d-flex gap-3 align-items-center flex-wrap" style="font-size:.75rem">
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#00FF00;box-shadow:0 0 2px #00aa00"></span>IRI ≤ 3.6（正常）
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#00FF00;box-shadow:0 0 2px #00aa00"></span>正常（IRI≤3.6 且 PCI≥70）
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FFFF00;box-shadow:0 0 2px #888800"></span>IRI 3.6～4.2（警戒）
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#FFFF00;box-shadow:0 0 2px #888800"></span>單超標（IRI或PCI其一）
         </span>
         <span style="display:inline-flex;align-items:center;gap:4px">
-          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#FF00FF;box-shadow:0 0 3px #880088"></span>IRI &gt; 4.2（超標）
+          <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#FF00FF;box-shadow:0 0 3px #880088"></span>雙超標（IRI且PCI）
         </span>
       </div>
     </div>
@@ -388,14 +388,68 @@ PCI: 58"></textarea>
       </div>
     </div>
   </div>
+  <!-- ===================== 保固路段管理 panel ===================== -->
+  <div id="warrantyPanel" style="margin-top:14px">
+  <div class="panel">
+    <div class="panel-title">🔒 保固路段管理</div>
+    <p style="font-size:.8rem;color:#555;margin-bottom:10px">設定有保固期的路段，系統將在分析結果中標示並排除估費</p>
+    <!-- 現有保固路段表格 -->
+    <div style="overflow-x:auto;margin-bottom:12px">
+      <table class="table table-sm table-bordered mb-0">
+        <thead class="table-primary">
+          <tr>
+            <th>路名</th>
+            <th>起始樁(m)</th>
+            <th>結束樁(m)</th>
+            <th>到期日</th>
+            <th>備註</th>
+            <th style="width:48px">刪除</th>
+          </tr>
+        </thead>
+        <tbody id="warrantyTable">
+          <tr><td colspan="6" class="text-center text-muted py-2">尚無保固路段</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- 新增一列輸入 -->
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3 col-6">
+        <label class="form-label" style="font-size:.78rem">路名</label>
+        <input type="text" class="form-control form-control-sm" id="wRoadName" placeholder="例：高鐵北路一段">
+      </div>
+      <div class="col-md-2 col-6">
+        <label class="form-label" style="font-size:.78rem">起始樁(m)</label>
+        <input type="number" class="form-control form-control-sm" id="wStartPos" value="0" min="0">
+      </div>
+      <div class="col-md-2 col-6">
+        <label class="form-label" style="font-size:.78rem">結束樁(m)</label>
+        <input type="number" class="form-control form-control-sm" id="wEndPos" value="9999" min="0">
+      </div>
+      <div class="col-md-2 col-6">
+        <label class="form-label" style="font-size:.78rem">到期日</label>
+        <input type="date" class="form-control form-control-sm" id="wExpiryDate" value="2026-03-30">
+      </div>
+      <div class="col-md-2 col-6">
+        <label class="form-label" style="font-size:.78rem">備註</label>
+        <input type="text" class="form-control form-control-sm" id="wNote" placeholder="例：專案CX">
+      </div>
+      <div class="col-md-1 col-6">
+        <button class="btn btn-sm btn-primary w-100" id="addWarrantyBtn">新增</button>
+      </div>
+    </div>
+  </div>
 </div>
+</div><!-- /tab-settings -->
 
 </div><!-- tab-content -->
 </div><!-- container -->
 
 <!-- 地圖側滑面板（不換頁） -->
 <div class="offcanvas offcanvas-end" tabindex="-1" id="mapOffcanvas"
-     style="width:min(600px,95vw);border-left:3px solid var(--primary)">
+     style="width:min(660px,95vw);border-left:3px solid var(--primary);transition:none">
+  <!-- 拖曳把手（左側） -->
+  <div id="ocResizeHandle" style="position:absolute;left:0;top:0;width:6px;height:100%;cursor:ew-resize;z-index:9999;background:transparent"
+       title="拖曳調整寬度"></div>
   <div class="offcanvas-header" style="background:var(--primary);color:#fff;padding:10px 16px">
     <div style="flex:1;min-width:0">
       <div class="fw-bold" id="ocMapTitle" style="font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">地圖定位</div>
@@ -822,12 +876,12 @@ function scoreSegment(seg, cfg) {
 }
 
 function getSeverity(seg, cfg) {
-  // IRI 三段分色：> iriUpper(4.2) 紫紅 / > iriThreshold(3.6) 黃 / 其餘綠
-  const upper = cfg.iriUpper  ?? 4.2;
-  const lower = cfg.iriThreshold ?? 3.6;
-  if (seg.maxIRI > upper)  return { key:'critical', label:'IRI超標',  color:'#CC00CC', mapColor:'#FF00FF' };
-  if (seg.maxIRI > lower)  return { key:'mid',      label:'IRI警戒',  color:'#B89000', mapColor:'#FFFF00' };
-  return                           { key:'low',      label:'正常',     color:'#00AA00', mapColor:'#00FF00' };
+  // 三色規定：兩個都超標 → 紫紅 / 其中一個超標 → 黃 / 兩個都正常 → 綠
+  const iBad = seg.maxIRI != null && seg.maxIRI > (cfg.iriThreshold ?? 3.6);
+  const pBad = seg.minPCI != null && seg.minPCI < (cfg.pciThreshold ?? 70);
+  if (iBad && pBad) return { key:'critical', label:'雙超標', color:'#CC00CC', mapColor:'#FF00FF' };
+  if (iBad || pBad) return { key:'mid',      label:'單超標', color:'#B89000', mapColor:'#FFFF00' };
+  return                   { key:'low',      label:'正常',   color:'#00AA00', mapColor:'#00FF00' };
 }
 
 // 破壞類型判斷（依 PCI 分級 + IRI 輔助）
@@ -987,6 +1041,7 @@ function renderResults(segs) {
             ${seg.isMultiLane ? `<span class="tag tag-multi">雙車道劣化</span>` : ''}
             ${seg.maxIRI > cfg.iriThreshold ? `<span class="tag tag-iri">IRI超標</span>` : ''}
             ${seg.minPCI < cfg.pciThreshold ? `<span class="tag tag-pci">PCI異常</span>` : ''}
+            ${isSegInWarranty(seg) ? `<span class="tag" style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9">🔒 保固申請</span>` : ''}
           </div>
           <div class="d-flex flex-wrap gap-3" style="font-size:.8rem;color:#555">
             <span>📍 樁位 ${seg.startPos}m ～ ${seg.endPos}m</span>
@@ -1033,10 +1088,12 @@ function renderResults(segs) {
               <div class="fw-bold ${seg.minPCI < cfg.pciThreshold ? 'text-danger' : ''}" style="font-size:1rem">${seg.minPCI}</div>
             </div>
           </div>
-          <div class="text-end">
+          <div class="text-end" ${isSegInWarranty(seg)?'title="此路段在保固期，建議向原承包商申請保固維修"':''}>
             <div style="font-size:.7rem;color:#888">${fmt(cost.area)}m²</div>
-            <div class="fw-bold text-danger" style="font-size:1.05rem">${fmt(cost.total)} 元</div>
-            <div style="font-size:.7rem;color:#aaa">≈ ${(cost.total/10000).toFixed(1)} 萬</div>
+            ${isSegInWarranty(seg)
+              ? `<div class="fw-bold" style="font-size:1.05rem;color:#1565c0">保固申請</div>`
+              : `<div class="fw-bold text-danger" style="font-size:1.05rem">${fmt(cost.total)} 元</div>
+            <div style="font-size:.7rem;color:#aaa">≈ ${(cost.total/10000).toFixed(1)} 萬</div>`}
           </div>
           ${hasGPS ? `<button onclick="focusMapOnSegment(${realIdx})"
             style="font-size:.72rem;padding:3px 9px;background:#e3f2fd;border:1px solid #90caf9;border-radius:10px;cursor:pointer;color:#1565c0">
@@ -1103,6 +1160,7 @@ function runBudgetPlan() {
     const realIdx = segments.indexOf(seg);
     const hasGPS  = seg.piles.some(p => p.gpsX && !isNaN(p.gpsX));
     const dirStr  = seg.direction && seg.direction !== '—' ? seg.direction : '';
+    const inW     = isSegInWarranty(seg);
     return `<tr style="font-size:.78rem">
       <td class="text-center fw-bold" style="color:${sev.color}">${i+1}</td>
       <td><strong>${seg.roadName}</strong> ${dirStr}</td>
@@ -1111,7 +1169,9 @@ function runBudgetPlan() {
       <td>${seg.startPos}～${seg.endPos}m（${seg.length}m）</td>
       <td>${seg.costInfo.damage.icon} ${seg.costInfo.damage.label}</td>
       <td>${seg.costInfo.method.method}</td>
-      <td class="text-end fw-bold text-danger">${fmt(seg.costInfo.total)}</td>
+      <td class="text-end fw-bold" ${inW?'title="此路段在保固期，建議向原承包商申請保固維修"':''}>
+        ${inW ? '<span style="color:#1565c0;font-weight:bold">保固申請</span>' : `<span class="text-danger">${fmt(seg.costInfo.total)}</span>`}
+      </td>
       <td class="text-center">${hasGPS
         ? `<button onclick="focusMapOnSegment(${realIdx})" title="地圖定位"
             style="font-size:.7rem;padding:2px 7px;background:#e3f2fd;border:1px solid #90caf9;border-radius:10px;cursor:pointer;color:#1565c0">
@@ -1197,13 +1257,13 @@ function renderMap() {
     mapLayerGroup.clearLayers();
   }
 
-  // IRI 三段分色：> iriUpper → #FF00FF / > iriThreshold → #FFFF00 / 其餘 → #00FF00
+  // 三色規定：IRI且PCI雙超標→紫紅 / 單超標→黃 / 都正常→綠
   function pileStyle(p) {
-    const upper = cfg.iriUpper ?? 4.2;
-    const lower = cfg.iriThreshold ?? 3.6;
-    if (p.iri != null && p.iri > upper) return { r:6, color:'#FF00FF', w:0 }; // IRI > 4.2：紫紅
-    if (p.iri != null && p.iri > lower) return { r:5, color:'#FFFF00', w:0 }; // IRI 3.6~4.2：黃
-    return                                     { r:4, color:'#00FF00', w:0 }; // IRI ≤ 3.6：綠
+    const iB = p.iri != null && p.iri > (cfg.iriThreshold ?? 3.6);
+    const pB = p.pci != null && p.pci < (cfg.pciThreshold ?? 70);
+    if (iB && pB) return { r:6, color:'#FF00FF', w:0 }; // 雙超標：紫紅
+    if (iB || pB) return { r:5, color:'#FFFF00', w:0 }; // 單超標：黃
+    return               { r:4, color:'#00FF00', w:0 }; // 正常：綠
   }
 
   // 建立樁位查找表（pilePos+lane → seg）方便彈窗顯示段落資訊
@@ -1249,6 +1309,19 @@ function renderMap() {
       ${segLine}
     </div>`);
     mapLayerGroup.addLayer(m);
+
+    // 保固標示：藍色外圈
+    const _today = new Date().toISOString().slice(0,10);
+    const inW = getWarrantyAreas().some(w => {
+      if (w.expiryDate && w.expiryDate < _today) return false;
+      return p.roadName && p.roadName.includes(w.roadName.trim()) &&
+             p.pilePos >= (w.startPos||0) && p.pilePos <= (w.endPos||9999);
+    });
+    if (inW) {
+      L.circleMarker([p.gpsY, p.gpsX], {
+        radius: st.r + 4, color: '#2196F3', weight: 2, fillOpacity: 0, opacity: 0.8
+      }).addTo(mapLayerGroup);
+    }
   }
 
   // 自動縮放到資料範圍
@@ -1273,6 +1346,48 @@ function focusMapOnSegment(segIdx) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // ── Offcanvas 拖曳調整寬度 ──
+  (function() {
+    const handle = document.getElementById('ocResizeHandle');
+    const panel  = document.getElementById('mapOffcanvas');
+    let dragging = false, startX = 0, startW = 0;
+    handle.addEventListener('mousedown', e => {
+      dragging = true;
+      startX = e.clientX;
+      startW = panel.offsetWidth;
+      document.body.style.userSelect = 'none';
+      document.body.style.cursor = 'ew-resize';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      const delta = startX - e.clientX;          // 往左拖 → 變寬
+      const newW  = Math.min(Math.max(startW + delta, 320), window.innerWidth * 0.95);
+      panel.style.width = newW + 'px';
+      if (ocMap) ocMap.invalidateSize();
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      if (ocMap) ocMap.invalidateSize();
+    });
+    // 觸控支援
+    handle.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      dragging = true; startX = t.clientX; startW = panel.offsetWidth;
+    }, { passive:true });
+    document.addEventListener('touchmove', e => {
+      if (!dragging) return;
+      const delta = startX - e.touches[0].clientX;
+      const newW  = Math.min(Math.max(startW + delta, 320), window.innerWidth * 0.95);
+      panel.style.width = newW + 'px';
+      if (ocMap) ocMap.invalidateSize();
+    }, { passive:true });
+    document.addEventListener('touchend', () => { dragging = false; });
+  })();
+
   document.getElementById('mapOffcanvas').addEventListener('shown.bs.offcanvas', () => {
     if (!ocMap) {
       ocMap = L.map('offcanvasMap');
@@ -1315,10 +1430,9 @@ function renderOcMap(seg) {
   const bgPiles = piles.filter(p =>
     p.roadName === seg.roadName && p.gpsX && !isNaN(p.gpsX));
   for (const p of bgPiles) {
-    const upper = cfg.iriUpper ?? 4.2;
-    const lower = cfg.iriThreshold ?? 3.6;
-    const c  = (p.iri != null && p.iri > upper) ? '#FF00FF'
-             : (p.iri != null && p.iri > lower) ? '#FFFF00' : '#00FF00';
+    const iB = p.iri != null && p.iri > (cfg.iriThreshold ?? 3.6);
+    const pB = p.pci != null && p.pci < (cfg.pciThreshold ?? 70);
+    const c  = (iB && pB) ? '#FF00FF' : (iB || pB) ? '#FFFF00' : '#00FF00';
     L.circleMarker([p.gpsY, p.gpsX], {
       radius: 4, fillColor: c, color: c, weight: 0, fillOpacity: 0.55
     }).addTo(ocLayers);
@@ -1610,7 +1724,7 @@ function printReport() {
     <div class="sum-box"><div class="sum-num">${fmt(totalArea)}</div><div class="sum-lbl">概估總面積 (m²)</div></div>
     <div class="sum-box"><div class="sum-num">${(totalCost/10000).toFixed(1)}</div><div class="sum-lbl">概估總費用 (萬元)</div></div>
   </div>
-  <p style="font-size:11px;color:#888;margin-bottom:16px">分析門檻：IRI ≤ ${cfg.iriThreshold} 綠色正常 ／ ${cfg.iriThreshold}～${cfg.iriUpper} 黃色警戒 ／ IRI &gt; ${cfg.iriUpper} 紫紅超標 ｜ PCI &lt; ${cfg.pciThreshold}（異常）｜ 最小連續 ${cfg.minConsecutive} 樁（${cfg.minConsecutive * cfg.pileInterval}m）</p>
+  <p style="font-size:11px;color:#888;margin-bottom:16px">顏色規定：🟢 正常（IRI ≤ ${cfg.iriThreshold} 且 PCI ≥ ${cfg.pciThreshold}）｜ 🟡 單超標（IRI 或 PCI 其一不及格）｜ 🟣 雙超標（IRI &gt; ${cfg.iriThreshold} 且 PCI &lt; ${cfg.pciThreshold}）｜ 最小連續 ${cfg.minConsecutive} 樁（${cfg.minConsecutive * cfg.pileInterval}m）</p>
 
   <h3>二、劣化路段排名（前 ${segs.length} 名）</h3>
   <table>
@@ -2058,6 +2172,49 @@ IRI: 1.20000
 PCI: 90`;
 
 // ===========================================================
+// 保固路段管理
+// ===========================================================
+function getWarrantyAreas() {
+  try { return JSON.parse(_storage.getItem('warrantyAreas') || '[]'); } catch(e) { return []; }
+}
+function saveWarrantyAreas(arr) {
+  _storage.setItem('warrantyAreas', JSON.stringify(arr));
+}
+function isSegInWarranty(seg) {
+  const today = new Date().toISOString().slice(0,10);
+  return getWarrantyAreas().some(w => {
+    if (w.expiryDate && w.expiryDate < today) return false; // 已過期
+    const nameMatch = seg.roadName && seg.roadName.includes(w.roadName.trim());
+    const posMatch  = seg.startPos <= (w.endPos||9999) && seg.endPos >= (w.startPos||0);
+    return nameMatch && posMatch;
+  });
+}
+
+function renderWarrantyTable() {
+  const arr = getWarrantyAreas();
+  const today = new Date().toISOString().slice(0,10);
+  const tb = document.getElementById('warrantyTable');
+  if (!tb) return;
+  if (arr.length===0) { tb.innerHTML='<tr><td colspan="6" class="text-center text-muted py-2">尚無保固路段</td></tr>'; return; }
+  tb.innerHTML = arr.map((w,i)=>`
+    <tr style="font-size:.8rem;${w.expiryDate&&w.expiryDate<today?'opacity:.5':''}">
+      <td>${w.roadName}</td>
+      <td>${w.startPos}m</td>
+      <td>${w.endPos>=9999?'全段':w.endPos+'m'}</td>
+      <td>${w.expiryDate||'—'} ${w.expiryDate&&w.expiryDate<today?'<span style="color:red">(已過期)</span>':w.expiryDate?'<span style="color:green">✓</span>':''}</td>
+      <td>${w.note||'—'}</td>
+      <td><button class="btn btn-sm btn-outline-danger py-0" onclick="deleteWarranty(${i})">✕</button></td>
+    </tr>`).join('');
+}
+
+function deleteWarranty(i) {
+  const arr = getWarrantyAreas();
+  arr.splice(i,1);
+  saveWarrantyAreas(arr);
+  renderWarrantyTable();
+}
+
+// ===========================================================
 // 初始化
 // ===========================================================
 document.addEventListener('DOMContentLoaded', () => {
@@ -2194,6 +2351,27 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('[data-bs-target="#tab-map"]').addEventListener('shown.bs.tab', () => {
     renderMap();
   });
+
+  // 保固管理
+  document.getElementById('addWarrantyBtn')?.addEventListener('click', () => {
+    const arr = getWarrantyAreas();
+    const rn = document.getElementById('wRoadName').value.trim();
+    if (!rn) return alert('請輸入路名');
+    arr.push({
+      id: Date.now(),
+      roadName: rn,
+      startPos: parseInt(document.getElementById('wStartPos').value)||0,
+      endPos:   parseInt(document.getElementById('wEndPos').value)||9999,
+      expiryDate: document.getElementById('wExpiryDate').value||'',
+      note: document.getElementById('wNote').value.trim()
+    });
+    saveWarrantyAreas(arr);
+    renderWarrantyTable();
+    document.getElementById('wRoadName').value='';
+    document.getElementById('wNote').value='';
+  });
+
+  renderWarrantyTable();
 });
 </script>
 </body>
