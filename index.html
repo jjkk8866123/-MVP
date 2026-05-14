@@ -1380,7 +1380,7 @@ function initOverlayControls() {
     const reader = new FileReader();
     reader.onload = e => {
       overlayImgUrl = e.target.result;
-      _storage.setItem('overlayImgUrl', overlayImgUrl);
+      // 不存到 localStorage（每次須重新上傳，避免舊圖自動出現）
       applyOverlayToMap();
       document.getElementById('overlayCtrl').style.display = '';
     };
@@ -1394,12 +1394,7 @@ function initOverlayControls() {
     if (overlayLayer && document.getElementById('overlayVisible').checked)
       overlayLayer.setOpacity(this.value / 100);
   });
-  // 還原上次圖片
-  const saved = _storage.getItem('overlayImgUrl');
-  if (saved) {
-    overlayImgUrl = saved;
-    document.getElementById('overlayCtrl').style.display = '';
-  }
+  // 不自動還原上次圖片
 }
 
 function getOverlayOpacity() {
@@ -1526,82 +1521,80 @@ function toggleOverlayDrag() {
 
 function attachOverlayDragEvents() {
   if (!mapInstance) return;
-  // 停用 Leaflet 所有互動，讓我們完全接管
   mapInstance.dragging.disable();
   mapInstance.scrollWheelZoom.disable();
   mapInstance.doubleClickZoom.disable();
   mapInstance.touchZoom.disable();
-  mapInstance.getContainer().style.cursor = 'grab';
-  // 使用 Leaflet 事件系統（mousedown 在 Leaflet 層，有正確的 latlng）
-  mapInstance.on('mousedown', _odLeafletDown);
-  // 觸控支援（原生 DOM）
-  mapInstance.getContainer().addEventListener('touchstart', _odTouchStart, { passive: false });
+  const con = mapInstance.getContainer();
+  con.style.cursor = 'grab';
+  con.addEventListener('mousedown',  _odMouseDown);
+  con.addEventListener('touchstart', _odTouchStart, { passive: false });
 }
 
 function detachOverlayDragEvents() {
   if (!mapInstance) return;
-  // 恢復 Leaflet 互動
   mapInstance.dragging.enable();
   mapInstance.scrollWheelZoom.enable();
   mapInstance.doubleClickZoom.enable();
   mapInstance.touchZoom.enable();
-  mapInstance.getContainer().style.cursor = '';
-  mapInstance.off('mousedown', _odLeafletDown);
-  mapInstance.off('mousemove', _odLeafletMove);
-  mapInstance.off('mouseup',   _odLeafletUp);
-  mapInstance.getContainer().removeEventListener('touchstart', _odTouchStart);
+  const con = mapInstance.getContainer();
+  con.style.cursor = '';
+  con.removeEventListener('mousedown',  _odMouseDown);
+  con.removeEventListener('touchstart', _odTouchStart);
+  document.removeEventListener('mousemove', _odMouseMove);
+  document.removeEventListener('mouseup',   _odMouseUp);
   document.removeEventListener('touchmove', _odTouchMove);
   document.removeEventListener('touchend',  _odTouchEnd);
   _odActive = false;
 }
 
-// Leaflet mousedown：e.latlng 是已換算的地圖座標，不需手動換算
-function _odLeafletDown(e) {
-  L.DomEvent.stopPropagation(e); // 阻止 Leaflet 底圖處理
-  _odStartLatLng  = e.latlng;
-  _odStartBounds  = overlayBounds.map(b => [...b]);
-  _odActive       = true;
+function _clientToLatLng(clientX, clientY) {
+  const rect = mapInstance.getContainer().getBoundingClientRect();
+  return mapInstance.containerPointToLatLng(
+    L.point(clientX - rect.left, clientY - rect.top));
+}
+
+function _odMouseDown(e) {
+  e.preventDefault(); e.stopPropagation();
+  _odStartLatLng = _clientToLatLng(e.clientX, e.clientY);
+  _odStartBounds = overlayBounds.map(b => [...b]);
+  _odActive = true;
   mapInstance.getContainer().style.cursor = 'grabbing';
-  mapInstance.on('mousemove', _odLeafletMove);
-  mapInstance.on('mouseup',   _odLeafletUp);
+  document.addEventListener('mousemove', _odMouseMove);
+  document.addEventListener('mouseup',   _odMouseUp);
 }
 
-function _odLeafletMove(e) {
-  if (!_odActive) return;
-  _odApplyDelta(e.latlng.lat - _odStartLatLng.lat, e.latlng.lng - _odStartLatLng.lng);
-}
-
-function _odLeafletUp(e) {
-  if (!_odActive) return;
-  _odActive = false;
-  mapInstance.getContainer().style.cursor = 'grab';
-  mapInstance.off('mousemove', _odLeafletMove);
-  mapInstance.off('mouseup',   _odLeafletUp);
-  setTimeout(applyOverlayTransform, 30);
-  showToast('圖片位置已更新 ✅', 'success');
-}
-
-// 觸控支援
 function _odTouchStart(e) {
-  if (!overlayDragMode || !e.touches[0]) return;
+  if (!e.touches[0]) return;
   e.preventDefault();
-  const pt = mapInstance.containerPointToLatLng(
-    L.point(e.touches[0].clientX - mapInstance.getContainer().getBoundingClientRect().left,
-            e.touches[0].clientY - mapInstance.getContainer().getBoundingClientRect().top));
-  _odStartLatLng = pt;
+  _odStartLatLng = _clientToLatLng(e.touches[0].clientX, e.touches[0].clientY);
   _odStartBounds = overlayBounds.map(b => [...b]);
   _odActive = true;
   document.addEventListener('touchmove', _odTouchMove, { passive: false });
   document.addEventListener('touchend',  _odTouchEnd);
 }
 
+function _odMouseMove(e) {
+  if (!_odActive) return;
+  const cur = _clientToLatLng(e.clientX, e.clientY);
+  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+}
+
 function _odTouchMove(e) {
   if (!_odActive || !e.touches[0]) return;
   e.preventDefault();
-  const rect = mapInstance.getContainer().getBoundingClientRect();
-  const pt = mapInstance.containerPointToLatLng(
-    L.point(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top));
-  _odApplyDelta(pt.lat - _odStartLatLng.lat, pt.lng - _odStartLatLng.lng);
+  const cur = _clientToLatLng(e.touches[0].clientX, e.touches[0].clientY);
+  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
+}
+
+function _odMouseUp() {
+  if (!_odActive) return;
+  _odActive = false;
+  mapInstance.getContainer().style.cursor = 'grab';
+  document.removeEventListener('mousemove', _odMouseMove);
+  document.removeEventListener('mouseup',   _odMouseUp);
+  applyOverlayTransform();
+  showToast('圖片位置已更新 ✅', 'success');
 }
 
 function _odTouchEnd() {
@@ -1609,14 +1602,17 @@ function _odTouchEnd() {
   _odActive = false;
   document.removeEventListener('touchmove', _odTouchMove);
   document.removeEventListener('touchend',  _odTouchEnd);
-  setTimeout(applyOverlayTransform, 30);
+  applyOverlayTransform();
   showToast('圖片位置已更新 ✅', 'success');
 }
 
 function _odApplyDelta(dLat, dLng) {
   const [[s0, w0], [n0, e0]] = _odStartBounds;
   overlayBounds = [[s0 + dLat, w0 + dLng], [n0 + dLat, e0 + dLng]];
-  if (overlayLayer) overlayLayer.setBounds(overlayBounds);
+  if (overlayLayer) {
+    overlayLayer.setBounds(overlayBounds);
+    applyOverlayTransform(); // setBounds 後立即補回旋轉/縮放
+  }
   const fN = document.getElementById('obN'); if(fN) fN.value = (n0+dLat).toFixed(4);
   const fS = document.getElementById('obS'); if(fS) fS.value = (s0+dLat).toFixed(4);
   const fW = document.getElementById('obW'); if(fW) fW.value = (w0+dLng).toFixed(4);
@@ -2737,12 +2733,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Gemini Key（綜合查詢頁的輸入框）
-  const savedGemini = _storage.getItem('geminiApiKey');
-  if (savedGemini) {
-    document.getElementById('geminiApiKey').value = savedGemini;
+  // Gemini Key：不自動填入，每次手動貼入（安全性考量）
+  // 若 localStorage 有儲存，只顯示「有儲存的 Key」提示，不顯示內容
+  if (_storage.getItem('geminiApiKey')) {
     document.getElementById('geminiKeyStatus').innerHTML =
-      '<span style="color:#16a34a"><i class="fa fa-check-circle me-1"></i>已儲存</span>';
+      '<span style="color:#888"><i class="fa fa-key me-1"></i>有已儲存的 Key（請手動貼入後儲存）</span>';
   }
   // 還原上次選擇的模型
   const savedModel = _storage.getItem('geminiModel');
