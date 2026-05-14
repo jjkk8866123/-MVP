@@ -1913,10 +1913,22 @@ async function callGemini(query, topSegs) {
     `${s.costInfo.method.method} 概估${fmt(s.costInfo.total)}元`
   ).join('\n');
 
+  const totalSegs = segments ? segments.length : topSegs.length;
+  const totalCost = topSegs.reduce((s, x) => s + (x.costInfo?.total||0), 0);
   const prompt =
-    `你是道路養護決策助手，請用繁體中文回答，60字以內，直接說重點。\n\n` +
-    `查詢：「${query}」\n\n分析數據（前5段）：\n${summary}\n\n` +
-    `請用1~2句話說明查詢結果重點，指出最需優先處理的路段名稱。`;
+    `你是道路養護決策助手，請用繁體中文，嚴格依照以下格式回覆，全文約180～220字，不得超過。\n\n` +
+    `格式（請照填，無資料的欄位填「—」）：\n` +
+    `📊 道路品質分析摘要\n` +
+    `劣化段數：{X}段 ｜ 概估總費：{X}萬元\n\n` +
+    `🔴 最需優先處理\n` +
+    `路段：{路名} [{專案}]\n` +
+    `車道：{車道} ｜ 里程：{起}～{訖}m（{長}m）\n` +
+    `IRI：{值} ｜ PCI：{值} ｜ 建議工法：{工法}\n` +
+    `概估費用：{金額}元\n\n` +
+    `⚠ 養護建議\n` +
+    `（請針對查詢「${query}」寫2句具體建議，說明優先順序與工法理由）\n\n` +
+    `查詢：「${query}」\n\n資料（前5段）：\n${summary}\n` +
+    `共 ${totalSegs} 段劣化，概估總費 ${Math.round(totalCost/10000)} 萬元`;
 
   try {
     const res = await fetch(
@@ -1992,35 +2004,56 @@ async function doAnalyze() {
   const tab = new bootstrap.Tab(document.querySelector('[data-bs-target="#tab-query"]'));
   tab.show();
 
-  // AI 摘要（Gemini 優先，備用 Claude）
-  const aiBox      = document.getElementById('aiResponse');
-  const geminiKey  = document.getElementById('geminiApiKey').value.trim() || _storage.getItem('geminiApiKey');
-  const claudeKey  = document.getElementById('apiKey').value.trim() || _storage.getItem('anthropicApiKey');
+  // ── 制式摘要框（不論有無 AI key 都顯示）──
+  const aiBox     = document.getElementById('aiResponse');
+  const geminiKey = document.getElementById('geminiApiKey').value.trim() || _storage.getItem('geminiApiKey');
+  const claudeKey = document.getElementById('apiKey').value.trim() || _storage.getItem('anthropicApiKey');
+  const cfg2      = getConfig();
+  const top3      = filtered.slice(0, 3);
+  const totalCostAll = filtered.reduce((s, x) => s + (x.costInfo?.total||0), 0);
 
-  if (query && (geminiKey || claudeKey)) {
-    aiBox.style.display = '';
-    aiBox.innerHTML = `<i class="fa fa-spinner fa-spin me-2"></i>AI 分析中...`;
-    aiBox.style.background = '#f8f9fa;';
+  // 建立基本制式摘要（純資料，不需 AI）
+  function buildBasicSummary() {
+    if (!filtered.length) return '';
+    const lines = [`<strong style="font-size:.85rem">📊 道路品質分析摘要</strong>`,
+      `<span style="font-size:.8rem;color:#555">劣化段數：<b>${filtered.length}</b> 段 ｜ 概估總費：<b>${(totalCostAll/10000).toFixed(1)}</b> 萬元</span>`,
+      `<hr style="margin:6px 0">`];
+    top3.forEach((s, i) => {
+      const sev = getSeverity(s, cfg2);
+      const icon = i===0 ? '🔴' : i===1 ? '🟠' : '🟡';
+      const inW  = isSegInWarranty(s);
+      lines.push(
+        `<div style="margin-bottom:4px;font-size:.8rem">` +
+        `${icon} <b>${s.roadName}</b>${s.project?` [${s.project}]`:''} ` +
+        `車道${(s.allLanes||[s.lane]).join('+')} ${s.startPos}～${s.endPos}m（${s.length}m）<br>` +
+        `&emsp;IRI <b>${s.maxIRI.toFixed(2)}</b> ｜ PCI <b>${s.minPCI}</b> ｜ ` +
+        `<span style="color:${sev.color}">${sev.label}</span> ｜ ` +
+        (inW
+          ? `<span style="color:#1565c0">🔒 保固申請</span>`
+          : `建議：${s.costInfo.method.method}，概估 <b>${(s.costInfo.total/10000).toFixed(1)}</b> 萬元`) +
+        `</div>`
+      );
+    });
+    if (filtered.length > 3) lines.push(`<span style="font-size:.75rem;color:#888">…共 ${filtered.length} 段，請見下方排名</span>`);
+    return lines.join('');
+  }
 
-    let aiText = null;
-    let provider = '';
-    if (geminiKey) {
-      aiText   = await callGemini(query, filtered);
-      provider = '🟢 Gemini';
-    }
-    if (!aiText && claudeKey) {
-      aiText   = await callClaude(query, filtered);
-      provider = '🤖 Claude';
-    }
+  aiBox.style.display = '';
+  aiBox.style.background = '#e8f4fd';
+  aiBox.innerHTML = buildBasicSummary() || `<span style="color:#888;font-size:.8rem">無劣化路段</span>`;
 
+  // 有 AI key 且有查詢關鍵字 → 再補 AI 建議
+  if (query && filtered.length && (geminiKey || claudeKey)) {
+    aiBox.innerHTML += `<hr style="margin:6px 0"><i class="fa fa-spinner fa-spin me-1" style="font-size:.75rem"></i><span style="font-size:.75rem;color:#888">Gemini 分析中...</span>`;
+    let aiText = null, provider = '';
+    if (geminiKey) { aiText = await callGemini(query, filtered); provider = '🟢 Gemini'; }
+    if (!aiText && claudeKey) { aiText = await callClaude(query, filtered); provider = '🤖 Claude'; }
     if (aiText) {
-      aiBox.innerHTML = `<strong style="font-size:.8rem;color:#555">${provider} 摘要：</strong>${aiText}`;
-      aiBox.style.background = '#e8f4fd';
+      aiBox.innerHTML = buildBasicSummary() +
+        `<hr style="margin:6px 0"><div style="font-size:.8rem;white-space:pre-line"><strong style="color:#1a3a6b">${provider} 養護建議：</strong><br>${aiText}</div>`;
     } else {
-      aiBox.style.display = 'none';
+      aiBox.innerHTML = buildBasicSummary();
     }
-  } else {
-    aiBox.style.display = 'none';
   }
 }
 
