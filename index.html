@@ -93,7 +93,7 @@ body { background:#f0f2f7; font-family:'Microsoft JhengHei',Arial,sans-serif; fo
 <!-- Tabs -->
 <ul class="nav nav-tabs" id="mainTabs">
   <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-data"><i class="fa fa-database me-1"></i>資料輸入</button></li>
-  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-query"><i class="fa fa-microphone me-1"></i>語音查詢</button></li>
+  <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-query"><i class="fa fa-search me-1"></i>綜合查詢</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cost"><i class="fa fa-calculator me-1"></i>費用設定</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-map"><i class="fa fa-map-marked-alt me-1"></i>地圖檢視</button></li>
   <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-settings"><i class="fa fa-cog me-1"></i>進階設定</button></li>
@@ -176,10 +176,31 @@ PCI: 58"></textarea>
   </div>
 </div>
 
-<!-- ===================== TAB 2：語音查詢 ===================== -->
+<!-- ===================== TAB 2：綜合查詢 ===================== -->
 <div class="tab-pane fade" id="tab-query">
+
+  <!-- Gemini API Key 快速設定列 -->
+  <div class="panel py-2 px-3 mb-0" style="border-radius:8px 8px 0 0;background:#f0f4ff;border-bottom:1px solid #d0d8f0">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+      <img src="https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg"
+           style="width:18px;height:18px" onerror="this.style.display='none'">
+      <span style="font-size:.8rem;font-weight:600;color:#1a3a6b">Gemini API Key</span>
+      <input type="password" id="geminiApiKey" class="form-control form-control-sm"
+             placeholder="AIzaSy... （貼入後自動儲存）"
+             style="max-width:320px;font-size:.8rem">
+      <button class="btn btn-sm btn-outline-primary py-0 px-2" id="btnSaveGeminiQ" style="font-size:.78rem">
+        <i class="fa fa-save me-1"></i>儲存
+      </button>
+      <span id="geminiKeyStatus" style="font-size:.75rem;color:#888"></span>
+      <a href="https://aistudio.google.com/app/apikey" target="_blank"
+         style="font-size:.75rem;color:#1a73e8;margin-left:auto">
+        <i class="fa fa-external-link-alt me-1"></i>免費取得 API Key
+      </a>
+    </div>
+  </div>
+
   <!-- 查詢輸入區 -->
-  <div class="panel">
+  <div class="panel" style="border-radius:0 0 8px 8px;margin-top:0;border-top:none">
     <div class="row align-items-center g-3">
       <div class="col-auto">
         <div class="voice-wrap">
@@ -208,15 +229,15 @@ PCI: 58"></textarea>
         </button>
       </div>
     </div>
-    <!-- AI 回覆區（需 API Key） -->
+    <!-- AI 回覆區 -->
     <div id="aiResponse" style="display:none" class="mt-3 p-3 rounded" style="background:#f8f9fa;font-size:.85rem;"></div>
   </div>
 
   <!-- 分析結果 -->
   <div id="resultsArea">
     <div class="text-center text-muted py-5">
-      <i class="fa fa-microphone fa-3x d-block mb-3 opacity-25"></i>
-      <p>請先在「資料輸入」頁面載入樁號資料，<br>再使用語音或文字查詢</p>
+      <i class="fa fa-search fa-3x d-block mb-3 opacity-25"></i>
+      <p>請先在「資料輸入」頁面載入樁號資料，<br>再使用語音或文字查詢（支援 Gemini AI 分析）</p>
     </div>
   </div>
 </div>
@@ -313,32 +334,17 @@ PCI: 58"></textarea>
   <div class="row">
     <div class="col-md-6">
       <div class="panel">
-        <div class="panel-title">AI 語音查詢設定（選用）</div>
-        <div class="alert alert-info py-2" style="font-size:.78rem">
+        <div class="panel-title">AI 查詢設定</div>
+        <div class="alert alert-success py-2 mb-3" style="font-size:.78rem">
           <i class="fa fa-info-circle me-1"></i>
-          填入 API Key 後，語音查詢時 AI 會自動摘要分析結果。<strong>兩個填一個即可</strong>，Gemini 優先。
+          Gemini API Key 請在「<strong>綜合查詢</strong>」頁籤頂端直接輸入，輸入後按儲存即可。
+          <a href="#" onclick="document.querySelector('[data-bs-target=\'#tab-query\']').click();return false" class="ms-2">→ 前往設定</a>
         </div>
 
-        <!-- Gemini -->
-        <div class="mb-3 p-3 rounded" style="background:#f0fdf4;border:1px solid #86efac">
-          <div class="fw-bold mb-2" style="color:#16a34a;font-size:.85rem">
-            <img src="https://www.gstatic.com/lamda/images/gemini_sparkle_v002_d4735304ff6292a690345.svg"
-              style="width:16px;height:16px;margin-right:4px" onerror="this.style.display='none'">
-            Google Gemini（推薦・免費方案可用）
-          </div>
-          <input type="password" class="form-control form-control-sm" id="geminiApiKey" placeholder="AIzaSy...">
-          <div class="form-text">至 <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a> 免費取得</div>
-          <div class="d-flex gap-2 mt-2">
-            <button class="btn btn-sm btn-success" id="btnSaveGemini"><i class="fa fa-save me-1"></i>儲存</button>
-            <button class="btn btn-sm btn-outline-secondary" id="btnTestGemini">測試</button>
-            <span id="geminiTestResult" style="font-size:.8rem;line-height:2.2"></span>
-          </div>
-        </div>
-
-        <!-- Claude -->
+        <!-- Claude 備用 -->
         <div class="p-3 rounded" style="background:#fdf4ff;border:1px solid #d8b4fe">
           <div class="fw-bold mb-2" style="color:#7c3aed;font-size:.85rem">
-            <i class="fa fa-robot me-1"></i>Anthropic Claude（備用）
+            <i class="fa fa-robot me-1"></i>Anthropic Claude（備用，Gemini 不可用時才啟動）
           </div>
           <input type="password" class="form-control form-control-sm" id="apiKey" placeholder="sk-ant-api03-...">
           <div class="d-flex gap-2 mt-2">
@@ -354,12 +360,9 @@ PCI: 58"></textarea>
         <div class="panel-title">分析門檻參數</div>
         <div class="row g-3">
           <div class="col-6">
-            <label class="form-label" style="font-size:.8rem">IRI 警戒下限（黃色，超過才標記）</label>
-            <input type="number" class="form-control" id="iriThreshold" value="3.6" step="0.1" min="1">
-          </div>
-          <div class="col-6">
-            <label class="form-label" style="font-size:.8rem">IRI 超標上限（紫紅色，超過即超標）</label>
-            <input type="number" class="form-control" id="iriUpper" value="4.2" step="0.1" min="1">
+            <label class="form-label" style="font-size:.8rem">IRI 門檻值（超過視為異常）</label>
+            <input type="number" class="form-control" id="iriThreshold" value="4.2" step="0.1" min="1">
+            <div class="form-text" style="font-size:.72rem">預設 4.2｜同時超標 IRI+PCI → 紫紅</div>
           </div>
           <div class="col-6">
             <label class="form-label" style="font-size:.8rem">PCI 警戒值（低於視為異常）</label>
@@ -507,8 +510,7 @@ function fmt(n) { return Math.round(n).toLocaleString(); }
 
 function getConfig() {
   return {
-    iriThreshold:  getNum('iriThreshold', 3.6),
-    iriUpper:      getNum('iriUpper', 4.2),
+    iriThreshold:  getNum('iriThreshold', 4.2),
     pciThreshold:  getNum('pciThreshold', 70),
     minConsecutive:getInt('minConsecutive', 2),
     pileInterval:  getInt('pileInterval', 20),
@@ -1814,7 +1816,7 @@ function renderSummary(pilesData) {
     </table>
     </div>` : `<div class="alert alert-success py-2" style="font-size:.8rem">✓ 所有路段均在正常範圍內</div>`}
     <button class="btn btn-success btn-sm w-100" onclick="switchToQuery()">
-      <i class="fa fa-arrow-right me-1"></i>前往語音查詢，查看詳細分析與費用概算 →
+      <i class="fa fa-arrow-right me-1"></i>前往綜合查詢，查看詳細分析與費用概算 →
     </button>`;
 }
 
@@ -2292,31 +2294,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Gemini Key
+  // Gemini Key（綜合查詢頁的輸入框）
   const savedGemini = _storage.getItem('geminiApiKey');
-  if (savedGemini) document.getElementById('geminiApiKey').value = savedGemini;
-
-  document.getElementById('btnSaveGemini').addEventListener('click', () => {
+  if (savedGemini) {
+    document.getElementById('geminiApiKey').value = savedGemini;
+    document.getElementById('geminiKeyStatus').innerHTML =
+      '<span style="color:#16a34a"><i class="fa fa-check-circle me-1"></i>已儲存</span>';
+  }
+  // 儲存按鈕
+  document.getElementById('btnSaveGeminiQ').addEventListener('click', () => {
     const k = document.getElementById('geminiApiKey').value.trim();
     _storage.setItem('geminiApiKey', k);
+    const st = document.getElementById('geminiKeyStatus');
+    st.innerHTML = k
+      ? '<span style="color:#16a34a"><i class="fa fa-check-circle me-1"></i>已儲存</span>'
+      : '<span style="color:#888">已清除</span>';
     showToast('Gemini API Key 已儲存', 'success');
   });
-
-  document.getElementById('btnTestGemini').addEventListener('click', async () => {
-    const res = document.getElementById('geminiTestResult');
-    res.innerHTML = '<i class="fa fa-spinner fa-spin"></i> 測試中...';
-    const k = document.getElementById('geminiApiKey').value.trim();
-    if (!k) { res.innerHTML = '<span class="text-danger">請先輸入 Key</span>'; return; }
-    try {
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${k}`,
-        { method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ contents:[{parts:[{text:'hi'}]}], generationConfig:{maxOutputTokens:5} }) }
-      );
-      const d = await r.json();
-      if (r.ok && !d.error) res.innerHTML = '<span class="text-success"><i class="fa fa-check me-1"></i>連線成功</span>';
-      else res.innerHTML = `<span class="text-danger">失敗：${d.error?.message||r.status}</span>`;
-    } catch(e) { res.innerHTML = `<span class="text-danger">${e.message}</span>`; }
+  // 輸入時即時提示
+  document.getElementById('geminiApiKey').addEventListener('input', function() {
+    document.getElementById('geminiKeyStatus').innerHTML =
+      this.value.trim() ? '<span style="color:#f59e0b">未儲存</span>' : '';
   });
 
   // Claude Key
