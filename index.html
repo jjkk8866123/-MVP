@@ -556,13 +556,18 @@ function parseCSVPiles(text) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
   if (lines.length < 2) return null;
 
-  // 解析標頭（不限大小寫，去引號）
+  // 解析標頭（不限大小寫，去引號，正規化）
   const rawHeader = parseCSVLine(lines[0]);
-  const header = rawHeader.map(h => h.replace(/"/g,'').trim().toLowerCase());
+  const header = rawHeader.map(h =>
+    h.replace(/"/g,'').trim().toLowerCase().normalize('NFC'));
 
   const find = (...keys) => {
     for (const k of keys) {
-      const i = header.findIndex(h => h === k);
+      // 精確比對
+      let i = header.findIndex(h => h === k.normalize('NFC'));
+      if (i >= 0) return i;
+      // 包含比對（允許欄位名有前後多餘字元）
+      i = header.findIndex(h => h.includes(k.normalize('NFC')));
       if (i >= 0) return i;
     }
     return -1;
@@ -639,27 +644,30 @@ function readCSVFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     const buffer = e.target.result;
-    // 解碼策略：UTF-8(去BOM) → Big5 → fallback
-    function decodeBuffer(buf) {
-      const bytes = new Uint8Array(buf);
-      const hasBOM = bytes[0]===0xEF && bytes[1]===0xBB && bytes[2]===0xBF;
-      const utf8 = new TextDecoder('utf-8').decode(buf);
-      const clean = hasBOM ? utf8.slice(1) : utf8;
-      if (!clean.includes('�')) return [clean];      // UTF-8 成功
-      try { return [new TextDecoder('big5').decode(buf), clean]; } // Big5, UTF-8備援
-      catch(e2) { return [clean]; }
+    // 解碼策略：同時試 UTF-8(去BOM) 與 Big5，誰能解析欄位就用誰
+    function allDecodings(buf) {
+      const results = [];
+      // UTF-8（去 BOM）
+      try {
+        const raw = new TextDecoder('utf-8').decode(buf);
+        const bom = raw.charCodeAt(0) === 0xFEFF;
+        results.push(bom ? raw.slice(1) : raw);
+      } catch(e) {}
+      // Big5（Excel 繁體中文預設）
+      try { results.push(new TextDecoder('big5').decode(buf)); } catch(e) {}
+      // CP950（Windows 繁體中文另一別名）
+      try { results.push(new TextDecoder('windows-950').decode(buf)); } catch(e) {}
+      return results;
     }
-    const candidates = decodeBuffer(buffer);
-    // 嘗試每種候選編碼，取第一個能解析成功的
+    const candidates = allDecodings(buffer);
     let parsed = null;
-    let usedText = candidates[0];
+    let usedText = candidates[0] || '';
     for (const t of candidates) {
       const p = parseCSVPiles(t);
-      if (p) { parsed = p; usedText = t; break; }
+      if (p && p.length > 0) { parsed = p; usedText = t; break; }
     }
     if (!parsed) {
-      // 顯示前 80 字元幫助除錯
-      const preview = usedText.substring(0, 80).replace(/</g,'&lt;');
+      const preview = (usedText||'').substring(0,100).replace(/[<>]/g, c => c==='<'?'&lt;':'&gt;');
       st.innerHTML = `<span class="text-danger">❌ 無法辨識欄位，請確認含有：路名, 車道, 里程, IRI, PCI<br><small style="color:#999">讀取到：${preview}</small></span>`;
       return;
     }
