@@ -1158,12 +1158,23 @@ function renderResults(segs) {
     const pileRows = seg.piles.map(p => {
       const iB = p.iri != null && p.iri > cfg.iriThreshold;
       const pB = p.pci != null && p.pci < cfg.pciThreshold;
+      const hasGPS = p.gpsX && p.gpsY && !isNaN(p.gpsX) && !isNaN(p.gpsY);
+      const locBtn = hasGPS
+        ? `<td style="padding:2px 6px;text-align:center">
+             <button onclick="focusMapOnPile(${p.gpsY},${p.gpsX},'${seg.roadName} 樁位${p.pilePos}m 車道${p.lane}')"
+               title="在地圖上定位此樁位"
+               style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;cursor:pointer;padding:1px 5px;font-size:.7rem;color:#1565c0">
+               📍
+             </button>
+           </td>`
+        : `<td style="padding:2px 6px;text-align:center;color:#ccc;font-size:.7rem">—</td>`;
       return `<tr style="font-size:.72rem${iB&&pB ? ';background:#fce4ec' : ''}">
         <td style="padding:2px 8px;white-space:nowrap;font-weight:600">車道 ${p.lane}</td>
         <td style="padding:2px 8px;white-space:nowrap">${p.pilePos}m</td>
         <td style="padding:2px 8px;${iB?'color:#c62828;font-weight:bold':'color:#555'}">${p.iri!=null?p.iri.toFixed(2):'—'}</td>
         <td style="padding:2px 8px;${pB?'color:#c62828;font-weight:bold':'color:#555'}">${p.pci!=null?p.pci:'—'}</td>
         <td style="padding:2px 8px">${iB&&pB?'⚠嚴重':iB?'⚠IRI':pB?'⚠PCI':'✓'}</td>
+        ${locBtn}
       </tr>`;
     }).join('');
 
@@ -1208,6 +1219,7 @@ function renderResults(segs) {
                     <th style="padding:3px 10px;font-size:.72rem">IRI</th>
                     <th style="padding:3px 10px;font-size:.72rem">PCI</th>
                     <th style="padding:3px 10px;font-size:.72rem">狀態</th>
+                    <th style="padding:3px 8px;font-size:.72rem">地圖</th>
                   </tr></thead>
                   <tbody>${pileRows}</tbody>
                 </table>
@@ -1408,15 +1420,16 @@ function applyOverlayToMap() {
     opacity: getOverlayOpacity(), interactive: false
   }).addTo(mapInstance);
   document.getElementById('overlayCtrl').style.display = '';
-  // 圖片載入後：套用旋轉/縮放，並若拖曳模式開啟則重新掛載事件
-  overlayLayer.once('load', () => {
+
+  // ★ 關鍵修正：攔截 Leaflet 的 _reset，每次 Leaflet 重定位後立刻補回旋轉/縮放
+  const origReset = overlayLayer._reset.bind(overlayLayer);
+  overlayLayer._reset = function() {
+    origReset();
     applyOverlayTransform();
-    if (overlayDragMode) attachOverlayDragEvents();
-  });
-  setTimeout(() => {
-    applyOverlayTransform();
-    if (overlayDragMode) attachOverlayDragEvents();
-  }, 100);
+  };
+
+  overlayLayer.once('load', applyOverlayTransform);
+  setTimeout(applyOverlayTransform, 80);
 }
 
 function applyOverlayBounds() {
@@ -1437,14 +1450,18 @@ function toggleOverlayEditor() {
 // 舊名稱保持相容
 function showOverlayBoundsEditor() { toggleOverlayEditor(); }
 
-// 套用旋轉 + 縮放 CSS transform 到圖片元素
+// 套用旋轉 + 縮放，同時保留 Leaflet 的 translate3d 定位
 function applyOverlayTransform() {
   if (!overlayLayer || !overlayLayer._image) return;
   const rot = parseFloat(document.getElementById('overlayRotation')?.value || 0);
   const sc  = parseFloat(document.getElementById('overlayScale')?.value || 100) / 100;
   const img = overlayLayer._image;
+  // Leaflet 用 _leaflet_pos 記錄圖片的像素位置
+  const pos = img._leaflet_pos;
+  const translate = pos ? `translate3d(${pos.x}px,${pos.y}px,0)` : '';
   img.style.transformOrigin = 'center center';
-  img.style.transform = `rotate(${rot}deg) scale(${sc})`;
+  // 合併 Leaflet translate + 我們的旋轉/縮放，避免蓋掉定位
+  img.style.transform = `${translate} rotate(${rot}deg) scale(${sc})`;
 }
 
 // 重置旋轉與縮放
@@ -1519,6 +1536,12 @@ function toggleOverlayDrag() {
   }
 }
 
+function _clientToLatLng(clientX, clientY) {
+  const rect = mapInstance.getContainer().getBoundingClientRect();
+  return mapInstance.containerPointToLatLng(
+    L.point(clientX - rect.left, clientY - rect.top));
+}
+
 function attachOverlayDragEvents() {
   if (!mapInstance) return;
   mapInstance.dragging.disable();
@@ -1527,8 +1550,8 @@ function attachOverlayDragEvents() {
   mapInstance.touchZoom.disable();
   const con = mapInstance.getContainer();
   con.style.cursor = 'grab';
-  con.addEventListener('mousedown',  _odMouseDown);
-  con.addEventListener('touchstart', _odTouchStart, { passive: false });
+  // capture:true → 在 Leaflet bubble-phase 之前攔截
+  con.addEventListener('pointerdown', _odPointerDown, true);
 }
 
 function detachOverlayDragEvents() {
@@ -1539,80 +1562,47 @@ function detachOverlayDragEvents() {
   mapInstance.touchZoom.enable();
   const con = mapInstance.getContainer();
   con.style.cursor = '';
-  con.removeEventListener('mousedown',  _odMouseDown);
-  con.removeEventListener('touchstart', _odTouchStart);
-  document.removeEventListener('mousemove', _odMouseMove);
-  document.removeEventListener('mouseup',   _odMouseUp);
-  document.removeEventListener('touchmove', _odTouchMove);
-  document.removeEventListener('touchend',  _odTouchEnd);
+  con.removeEventListener('pointerdown', _odPointerDown, true);
   _odActive = false;
 }
 
-function _clientToLatLng(clientX, clientY) {
-  const rect = mapInstance.getContainer().getBoundingClientRect();
-  return mapInstance.containerPointToLatLng(
-    L.point(clientX - rect.left, clientY - rect.top));
-}
-
-function _odMouseDown(e) {
-  e.preventDefault(); e.stopPropagation();
+function _odPointerDown(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  // setPointerCapture：確保後續所有 pointermove/up 都由此元素接收
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch(_) {}
   _odStartLatLng = _clientToLatLng(e.clientX, e.clientY);
   _odStartBounds = overlayBounds.map(b => [...b]);
   _odActive = true;
-  mapInstance.getContainer().style.cursor = 'grabbing';
-  document.addEventListener('mousemove', _odMouseMove);
-  document.addEventListener('mouseup',   _odMouseUp);
+  e.currentTarget.style.cursor = 'grabbing';
+  e.currentTarget.addEventListener('pointermove', _odPointerMove);
+  e.currentTarget.addEventListener('pointerup',   _odPointerUp);
+  e.currentTarget.addEventListener('pointercancel', _odPointerUp);
 }
 
-function _odTouchStart(e) {
-  if (!e.touches[0]) return;
-  e.preventDefault();
-  _odStartLatLng = _clientToLatLng(e.touches[0].clientX, e.touches[0].clientY);
-  _odStartBounds = overlayBounds.map(b => [...b]);
-  _odActive = true;
-  document.addEventListener('touchmove', _odTouchMove, { passive: false });
-  document.addEventListener('touchend',  _odTouchEnd);
-}
-
-function _odMouseMove(e) {
+function _odPointerMove(e) {
   if (!_odActive) return;
+  e.preventDefault();
   const cur = _clientToLatLng(e.clientX, e.clientY);
   _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
 }
 
-function _odTouchMove(e) {
-  if (!_odActive || !e.touches[0]) return;
-  e.preventDefault();
-  const cur = _clientToLatLng(e.touches[0].clientX, e.touches[0].clientY);
-  _odApplyDelta(cur.lat - _odStartLatLng.lat, cur.lng - _odStartLatLng.lng);
-}
-
-function _odMouseUp() {
+function _odPointerUp(e) {
   if (!_odActive) return;
   _odActive = false;
-  mapInstance.getContainer().style.cursor = 'grab';
-  document.removeEventListener('mousemove', _odMouseMove);
-  document.removeEventListener('mouseup',   _odMouseUp);
-  applyOverlayTransform();
-  showToast('圖片位置已更新 ✅', 'success');
-}
-
-function _odTouchEnd() {
-  if (!_odActive) return;
-  _odActive = false;
-  document.removeEventListener('touchmove', _odTouchMove);
-  document.removeEventListener('touchend',  _odTouchEnd);
-  applyOverlayTransform();
+  try { e.currentTarget.releasePointerCapture(e.pointerId); } catch(_) {}
+  e.currentTarget.style.cursor = 'grab';
+  e.currentTarget.removeEventListener('pointermove', _odPointerMove);
+  e.currentTarget.removeEventListener('pointerup',   _odPointerUp);
+  e.currentTarget.removeEventListener('pointercancel', _odPointerUp);
   showToast('圖片位置已更新 ✅', 'success');
 }
 
 function _odApplyDelta(dLat, dLng) {
   const [[s0, w0], [n0, e0]] = _odStartBounds;
   overlayBounds = [[s0 + dLat, w0 + dLng], [n0 + dLat, e0 + dLng]];
-  if (overlayLayer) {
-    overlayLayer.setBounds(overlayBounds);
-    applyOverlayTransform(); // setBounds 後立即補回旋轉/縮放
-  }
+  if (overlayLayer) overlayLayer.setBounds(overlayBounds);
+  // 更新精確座標欄位
   const fN = document.getElementById('obN'); if(fN) fN.value = (n0+dLat).toFixed(4);
   const fS = document.getElementById('obS'); if(fS) fS.value = (s0+dLat).toFixed(4);
   const fW = document.getElementById('obW'); if(fW) fW.value = (w0+dLng).toFixed(4);
@@ -1738,6 +1728,50 @@ function focusMapOnSegment(segIdx) {
   bootstrap.Offcanvas.getOrCreateInstance(
     document.getElementById('mapOffcanvas')
   ).show();
+}
+
+// 樁位明細點📍 → 切換到地圖頁並定位
+function focusMapOnPile(lat, lng, label) {
+  // 切換到地圖頁籤
+  const mapTab = document.querySelector('[data-bs-target="#tab-map"]');
+  if (mapTab) bootstrap.Tab.getOrCreateInstance(mapTab).show();
+
+  // 等地圖渲染完畢後定位
+  setTimeout(() => {
+    if (!mapInstance) { renderMap(); }
+    if (!mapInstance) return;
+    mapInstance.invalidateSize();
+    mapInstance.setView([lat, lng], 18);   // 縮放到街道級別
+
+    // 清除舊標記
+    if (!highlightLayerGroup) highlightLayerGroup = L.layerGroup().addTo(mapInstance);
+    highlightLayerGroup.clearLayers();
+
+    // 閃爍大圓圈標示
+    const marker = L.circleMarker([lat, lng], {
+      radius: 18, color: '#FF6600', weight: 3,
+      fillColor: '#FF6600', fillOpacity: 0.25
+    }).addTo(highlightLayerGroup);
+
+    // 中心點紅點
+    L.circleMarker([lat, lng], {
+      radius: 6, color: '#FF6600', weight: 2,
+      fillColor: '#FF3300', fillOpacity: 1
+    }).addTo(highlightLayerGroup);
+
+    // 彈窗顯示資訊
+    L.popup({ offset: [0, -10] })
+      .setLatLng([lat, lng])
+      .setContent(`<div style="font-size:.82rem;line-height:1.6">
+        <b>📍 ${label}</b><br>
+        <span style="color:#888;font-size:.75rem">GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}</span>
+      </div>`)
+      .openOn(mapInstance);
+
+    // 顯示頂部提示列
+    const b = document.getElementById('mapBanner');
+    if (b) { b.style.display = ''; b.textContent = `📍 ${label}（點此關閉標記）`; }
+  }, 350);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
