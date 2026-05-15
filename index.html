@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>道路品質分析工具 MVP｜東利工程</title>
+<title>道路品質分析工具｜東利工程</title>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -118,10 +118,17 @@ body { background:#f0f2f7; font-family:'Microsoft JhengHei',Arial,sans-serif; fo
 
 <!-- Top bar -->
 <div class="topbar">
-  <i class="fa fa-road fa-lg"></i>
+  <img src="./logo.png" style="height:38px;width:auto;margin-right:10px;vertical-align:middle" alt="DL東利工程">
   <h1>道路品質分析工具</h1>
-  <span class="badge-mvp">MVP</span>
-  <span style="margin-left:auto;font-size:.8rem;opacity:.8">東利工程養護決策輔助系統</span>
+  <a href="https://situation.kingyaninfo.com.tw/Login" target="_blank" rel="noopener"
+     style="margin-left:auto;font-size:.8rem;opacity:.9;color:#fff;text-decoration:none;
+            background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.4);
+            border-radius:5px;padding:4px 10px;white-space:nowrap;
+            transition:background .2s;"
+     onmouseover="this.style.background='rgba(255,255,255,0.28)'"
+     onmouseout="this.style.background='rgba(255,255,255,0.15)'">
+    <i class="fa fa-external-link-alt me-1" style="font-size:.75rem"></i>DL道路資訊管理系統
+  </a>
 </div>
 
 <!-- Tabs -->
@@ -195,6 +202,14 @@ PCI: 58"></textarea>
           style="position:absolute;opacity:0;width:1px;height:1px;overflow:hidden"
           onchange="handleFileSelect(this)">
         <div id="csvFileStatus" style="font-size:.78rem;color:#1565c0;text-align:center;margin-top:6px"></div>
+        <!-- 已儲存資料提示列 -->
+        <div id="csvStorageBar" style="display:none;margin-top:8px;padding:6px 10px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px;font-size:.78rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <i class="fa fa-database" style="color:#2e7d32"></i>
+          <span id="csvStorageInfo" style="flex:1;color:#1b5e20"></span>
+          <button onclick="clearSavedCSV()" class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:.72rem">
+            <i class="fa fa-trash me-1"></i>清除資料
+          </button>
+        </div>
       </div>
       <div class="panel" style="background:#fffde7;">
         <div class="panel-title" style="color:#f57f17;">格式說明</div>
@@ -611,6 +626,49 @@ let piles = [];
 let segments = [];
 let unitPrices = [];
 
+// ── CSV 資料持久化 ──
+function updateCSVStorageUI(name, pileCount, segCount) {
+  const bar  = document.getElementById('csvStorageBar');
+  const info = document.getElementById('csvStorageInfo');
+  if (!bar || !info) return;
+  if (name) {
+    bar.style.display = 'flex';
+    info.innerHTML = `<b>${name}</b> 已儲存於本機 ─ ${pileCount} 筆樁位 / ${segCount} 段劣化路段（重新開啟網頁會自動還原）`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function clearSavedCSV() {
+  if (!confirm('確定要清除已儲存的 CSV 資料嗎？')) return;
+  _storage.removeItem('savedCSVText');
+  _storage.removeItem('savedCSVName');
+  piles = []; segments = [];
+  renderSummary([]);
+  updateCSVStorageUI(null);
+  document.getElementById('csvFileStatus').innerHTML =
+    '<span style="color:#888">已清除儲存的資料</span>';
+  showToast('CSV 資料已清除', 'info');
+}
+
+function tryRestoreSavedCSV() {
+  const savedText = _storage.getItem('savedCSVText');
+  const savedName = _storage.getItem('savedCSVName');
+  if (!savedText) return;
+  try {
+    const parsed = parseCSVPiles(savedText);
+    if (!parsed || parsed.length === 0) return;
+    piles = parsed;
+    segments = analyzePiles(piles);
+    renderSummary(piles);
+    updateCSVStorageUI(savedName || 'CSV', parsed.length, segments.length);
+    document.getElementById('csvFileStatus').innerHTML =
+      `<span style="color:#2e7d32">✔ 已自動還原：<strong>${savedName || 'CSV'}</strong>（${parsed.length} 筆）</span>`;
+    document.getElementById('parseStatus').textContent =
+      `✔ CSV 還原 ${parsed.length} 筆，找到 ${segments.length} 段劣化路段`;
+  } catch(e) {}
+}
+
 const DEFAULT_PRICES = [
   { severity:'low',
     label:'輕度劣化', method:'薄層加鋪',
@@ -863,6 +921,12 @@ function readCSVFile(file) {
     st.innerHTML = `<span class="text-success">✔ 已載入 <strong>${file.name}</strong>：${parsed.length} 筆 ／ ${roads.length} 條道路 ／ 找到 ${segments.length} 段劣化路段</span>`;
     document.getElementById('parseStatus').textContent =
       `✔ CSV 載入 ${parsed.length} 筆，找到 ${segments.length} 段劣化路段`;
+    // 儲存到 localStorage（下次開頁自動還原）
+    try {
+      _storage.setItem('savedCSVText', usedText);
+      _storage.setItem('savedCSVName', file.name);
+    } catch(e) {}
+    updateCSVStorageUI(file.name, parsed.length, segments.length);
     // 清空 textarea 避免混淆
     document.getElementById('rawData').value = '';
     // 若地圖 tab 已開著，同步更新
@@ -1791,6 +1855,7 @@ function renderOcMapPile(pile) {
 
 document.addEventListener('DOMContentLoaded', () => {
   initOverlayControls();
+  tryRestoreSavedCSV(); // 自動還原上次儲存的 CSV
   // ── Offcanvas 拖曳調整寬度 ──
   (function() {
     const handle = document.getElementById('ocResizeHandle');
