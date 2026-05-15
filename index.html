@@ -1730,48 +1730,63 @@ function focusMapOnSegment(segIdx) {
   ).show();
 }
 
-// 樁位明細點📍 → 切換到地圖頁並定位
+// 樁位明細點📍 → 側邊 Offcanvas 地圖定位（不跳頁）
+let pendingOcPile = null;
+
 function focusMapOnPile(lat, lng, label) {
-  // 切換到地圖頁籤
-  const mapTab = document.querySelector('[data-bs-target="#tab-map"]');
-  if (mapTab) bootstrap.Tab.getOrCreateInstance(mapTab).show();
+  pendingOcPile = { lat, lng, label };
+  pendingOcSeg  = null; // 清除路段模式
+  bootstrap.Offcanvas.getOrCreateInstance(
+    document.getElementById('mapOffcanvas')
+  ).show();
+}
 
-  // 等地圖渲染完畢後定位
-  setTimeout(() => {
-    if (!mapInstance) { renderMap(); }
-    if (!mapInstance) return;
-    mapInstance.invalidateSize();
-    mapInstance.setView([lat, lng], 18);   // 縮放到街道級別
+function renderOcMapPile(pile) {
+  const { lat, lng, label } = pile;
+  ocMap.invalidateSize();
+  ocLayers.clearLayers();
+  ocMap.closePopup();
 
-    // 清除舊標記
-    if (!highlightLayerGroup) highlightLayerGroup = L.layerGroup().addTo(mapInstance);
-    highlightLayerGroup.clearLayers();
+  // 更新標題
+  document.getElementById('ocMapTitle').textContent = label;
+  document.getElementById('ocMapSubtitle').textContent =
+    `GPS：${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  document.getElementById('ocMapMsg').style.display = 'none';
 
-    // 閃爍大圓圈標示
-    const marker = L.circleMarker([lat, lng], {
-      radius: 18, color: '#FF6600', weight: 3,
-      fillColor: '#FF6600', fillOpacity: 0.25
-    }).addTo(highlightLayerGroup);
+  // 背景：同路名所有樁位（顏色參考）
+  const roadName = label.split(' ')[0];
+  const cfg = getConfig();
+  const bgPiles = piles.filter(p => p.roadName === roadName && p.gpsX && !isNaN(p.gpsX));
+  for (const p of bgPiles) {
+    const iB = p.iri != null && p.iri > (cfg.iriThreshold ?? 4.2);
+    const pB = p.pci != null && p.pci < (cfg.pciThreshold ?? 70);
+    const c  = (iB && pB) ? '#FF00FF' : (iB || pB) ? '#FFFF00' : '#00FF00';
+    L.circleMarker([p.gpsY, p.gpsX], {
+      radius: 4, fillColor: c, color: '#333', weight: 0.5, fillOpacity: 0.7
+    }).addTo(ocLayers);
+  }
 
-    // 中心點紅點
-    L.circleMarker([lat, lng], {
-      radius: 6, color: '#FF6600', weight: 2,
-      fillColor: '#FF3300', fillOpacity: 1
-    }).addTo(highlightLayerGroup);
+  // 目標樁位：橘色大圓圈 + 中心實心點
+  L.circleMarker([lat, lng], {
+    radius: 20, color: '#FF6600', weight: 3,
+    fillColor: '#FF6600', fillOpacity: 0.2
+  }).addTo(ocLayers);
+  L.circleMarker([lat, lng], {
+    radius: 7, fillColor: '#FF3300',
+    color: '#333', weight: 1.5, fillOpacity: 1
+  }).addTo(ocLayers);
 
-    // 彈窗顯示資訊
-    L.popup({ offset: [0, -10] })
-      .setLatLng([lat, lng])
-      .setContent(`<div style="font-size:.82rem;line-height:1.6">
-        <b>📍 ${label}</b><br>
-        <span style="color:#888;font-size:.75rem">GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}</span>
-      </div>`)
-      .openOn(mapInstance);
+  // 彈窗
+  L.popup({ autoClose: false, closeOnClick: false, offset: [0, -6] })
+    .setLatLng([lat, lng])
+    .setContent(`<div style="font-size:13px;line-height:1.8;min-width:160px">
+      <strong>📍 ${label}</strong><br>
+      <span style="font-size:11px;color:#888">GPS: ${lat.toFixed(5)}, ${lng.toFixed(5)}</span>
+    </div>`)
+    .openOn(ocMap);
 
-    // 顯示頂部提示列
-    const b = document.getElementById('mapBanner');
-    if (b) { b.style.display = ''; b.textContent = `📍 ${label}（點此關閉標記）`; }
-  }, 350);
+  // 定位到該點
+  ocMap.setView([lat, lng], 18);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -1828,7 +1843,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       ocMap.invalidateSize();
     }
-    if (pendingOcSeg) { renderOcMap(pendingOcSeg); pendingOcSeg = null; }
+    if (pendingOcPile) { renderOcMapPile(pendingOcPile); pendingOcPile = null; }
+    else if (pendingOcSeg) { renderOcMap(pendingOcSeg); pendingOcSeg = null; }
   });
 });
 
@@ -3020,8 +3036,8 @@ async function sendChatMsg(userMsg) {
 }
 </script>
 
-<!-- AI 客服精靈（暫時隱藏，待 API 額度確認後可移除 display:none）-->
-<button id="aiChatBtn" title="AI 助理" style="display:none">
+<!-- AI 客服精靈 -->
+<button id="aiChatBtn" title="AI 助理">
   <i class="fa fa-robot"></i>
   <div id="aiChatBadge"></div>
 </button>
