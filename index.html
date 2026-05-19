@@ -4213,6 +4213,7 @@ function clearSavedCSV() {
   if (!confirm('確定要清除已儲存的 CSV 資料嗎？')) return;
   _storage.removeItem('savedCSVText');
   _storage.removeItem('savedCSVName');
+  _storage.removeItem('savedCSVIsUserUpload');
   piles = []; segments = [];
   renderSummary([]);
   updateCSVStorageUI(null);
@@ -4237,6 +4238,7 @@ function loadBundledCSV() {
     try {
       _storage.setItem('savedCSVText', BUNDLED_CSV_TEXT);
       _storage.setItem('savedCSVName', '20260518_青埔特區點位.csv');
+      _storage.setItem('savedCSVIsUserUpload', '0');
     } catch(e) {}
   } catch(e) { console.warn('loadBundledCSV failed:', e); }
 }
@@ -4514,6 +4516,7 @@ function readCSVFile(file) {
     try {
       _storage.setItem('savedCSVText', usedText);
       _storage.setItem('savedCSVName', file.name);
+      _storage.setItem('savedCSVIsUserUpload', '1');
     } catch(e) {}
     updateCSVStorageUI(file.name, parsed.length, segments.length);
     // 清空 textarea 避免混淆
@@ -5444,8 +5447,8 @@ function renderOcMapPile(pile) {
 
 document.addEventListener('DOMContentLoaded', () => {
   initOverlayControls();
-  tryRestoreSavedCSV(); // 自動還原上次儲存的 CSV
-  if (piles.length === 0) loadBundledCSV(); // 無儲存資料時載入內建青埔特區
+  loadBundledCSV(); // 永遠先載入最新內建資料（20260518_青埔特區點位）
+  if (_storage.getItem('savedCSVIsUserUpload') === '1') tryRestoreSavedCSV(); // 使用者有手動上傳則覆蓋
   // ── Offcanvas 拖曳調整寬度 ──
   (function() {
     const handle = document.getElementById('ocResizeHandle');
