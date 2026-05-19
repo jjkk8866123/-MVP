@@ -273,13 +273,34 @@ PCI: 58"></textarea>
         <input type="text" class="form-control form-control-lg" id="queryText"
           placeholder="輸入或說：「哪裡的道路品質很差？」" style="font-size:1rem">
         <div class="mt-2 d-flex flex-wrap gap-2" id="quickBtns">
-          <button class="btn btn-outline-danger quick-btn" data-q="哪裡最差">⚠ 最差路段</button>
-          <button class="btn btn-outline-warning quick-btn" data-q="連續最長路段">📏 連續最長</button>
-          <button class="btn btn-outline-primary quick-btn" data-q="雙車道劣化">🚗 雙車道劣化</button>
-          <button class="btn btn-outline-info quick-btn" data-q="IRI超標排序">📊 IRI超標</button>
-          <button class="btn btn-outline-secondary quick-btn" data-q="PCI最低排序">📉 PCI最低</button>
-          <button class="btn btn-outline-danger quick-btn" data-q="緊急修復路段">🔴 緊急修復</button>
-          <button class="btn btn-outline-success quick-btn" data-q="費用概算排序">💰 費用排序</button>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="綜合評分排序：IRI超標程度＋PCI超標程度＋路段長度＋雙車道同步劣化加分＋雙超標加分，分數越高越優先">
+            <button class="btn btn-outline-danger quick-btn" data-q="哪裡最差">⚠ 最差路段</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="依連續超標路段長度由長到短排序，反映需要大面積施工的路段">
+            <button class="btn btn-outline-warning quick-btn" data-q="連續最長路段">📏 連續最長</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="篩選同一路段兩個車道同時超標（IRI或PCI）的路段，代表整條道路劣化">
+            <button class="btn btn-outline-primary quick-btn" data-q="雙車道劣化">🚗 雙車道劣化</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="依最大IRI值由高到低排序（IRI為國際平整度指數，數值越高代表路面越顛簸，門檻預設 3.6）">
+            <button class="btn btn-outline-info quick-btn" data-q="IRI超標排序">📊 IRI超標</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="依最低PCI值由低到高排序（PCI為路面狀況指數，數值越低代表破損越嚴重，門檻預設 70）">
+            <button class="btn btn-outline-secondary quick-btn" data-q="PCI最低排序">📉 PCI最低</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="篩選 IRI 與 PCI 雙超標的路段（IRI > 3.6 且 PCI < 70），代表平整度與結構同時惡化，需優先處理">
+            <button class="btn btn-outline-danger quick-btn" data-q="緊急修復路段">🔴 緊急修復</button>
+          </span>
+          <span class="quick-btn-wrap" data-bs-toggle="tooltip" data-bs-placement="bottom"
+            title="依概估修繕費用由高到低排序（費用＝施工面積×單價×（1＋利潤率）×（1＋稅率））">
+            <button class="btn btn-outline-success quick-btn" data-q="費用概算排序">💰 費用排序</button>
+          </span>
         </div>
       </div>
       <div class="col-auto d-flex gap-2">
@@ -5446,6 +5467,10 @@ function renderOcMapPile(pile) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  // 初始化 Bootstrap Tooltip（快捷按鈕說明）
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+    new bootstrap.Tooltip(el, { trigger: 'hover', delay: { show: 200, hide: 100 } });
+  });
   initOverlayControls();
   loadBundledCSV(); // 永遠先載入最新內建資料（20260518_青埔特區點位）
   if (_storage.getItem('savedCSVIsUserUpload') === '1') tryRestoreSavedCSV(); // 使用者有手動上傳則覆蓋
