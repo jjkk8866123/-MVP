@@ -6688,7 +6688,15 @@ function sendChatFromInput() {
 }
 
 function getChatContext() {
-  if (!window.segments || segments.length === 0) return '\n\n（目前尚未載入任何路段資料，請先在「資料輸入」頁面上傳 CSV 檔案。）';
+  if (!window.segments || segments.length === 0) {
+    // 自動載入內建青埔資料
+    if (typeof BUNDLED_CSV_TEXT !== 'undefined' && BUNDLED_CSV_TEXT) {
+      loadBundledCSV();
+    }
+    if (!window.segments || segments.length === 0) {
+      return '\n\n（目前尚未載入任何路段資料，請先在「資料輸入」頁面上傳 CSV 檔案。）';
+    }
+  }
   const cfg = typeof getConfig === 'function' ? getConfig() : {};
   const iriThr = cfg.iriThreshold ?? 4.2;
   const pciThr = cfg.pciThreshold ?? 70;
