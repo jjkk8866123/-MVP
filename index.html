@@ -318,7 +318,7 @@ PCI: 58"></textarea>
   <div id="resultsArea">
     <div class="text-center text-muted py-5">
       <i class="fa fa-search fa-3x d-block mb-3 opacity-25"></i>
-      <p>請先在「資料輸入」頁面載入樁號資料，<br>再使用語音或文字查詢（支援 Gemini AI 分析）</p>
+      <p>輸入查詢關鍵字或點擊下方快速標籤，<br>再按「分析」即可取得 AI 路況報告（已載入青埔特區示範資料）</p>
     </div>
   </div>
 </div>
@@ -5843,8 +5843,8 @@ function printReport() {
     .footer { margin-top:20px; font-size:11px; color:#aaa; text-align:center; border-top:1px solid #eee; padding-top:8px; }
     @media print { body { padding:10px; } }
   </style></head><body>
-  <h1>道路品質劣化分析報告</h1>
-  <div class="subtitle">東利工程養護決策輔助系統 ｜ 報告日期：${today}</div>
+  <h1>道路品質劣化分析報告（AI輔助）</h1>
+  <div class="subtitle">東利工程 AI 養護決策系統 ｜ 報告日期：${today} ｜ Powered by Gemini + Claude</div>
 
   <h3>一、摘要統計</h3>
   <div class="summary">
@@ -6211,13 +6211,16 @@ async function doAnalyze() {
             <strong style="color:#1a3a6b">🤖 Claude 深度分析</strong>
             <span style="color:#555;margin-left:8px;">複製提示詞 → 貼到 Claude.ai 取得完整養護評估報告</span>
           </div>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button onclick="copyClaudePrompt()" class="btn btn-sm btn-primary" style="font-size:.78rem;">
               <i class="fa fa-copy me-1"></i>複製提示詞
             </button>
             <a href="https://claude.ai" target="_blank" class="btn btn-sm btn-outline-secondary" style="font-size:.78rem;">
               開啟 Claude.ai <i class="fa fa-external-link ms-1"></i>
             </a>
+            <button onclick="printReport()" class="btn btn-sm btn-outline-dark" style="font-size:.78rem;">
+              <i class="fa fa-print me-1"></i>列印報告
+            </button>
           </div>
         </div>
       </div>`;
@@ -6654,7 +6657,7 @@ function toggleChat() {
   panel.classList.toggle('hidden', !chatOpen);
   document.getElementById('aiChatBadge').style.display = 'none';
   if (chatOpen && document.getElementById('aiChatMsgs').children.length === 0) {
-    appendChatBubble('ai', '您好！我是東利 AI 助理 🤖\n我可以回答道路品質分析相關問題，例如：\n• 目前最差的路段\n• 工法建議與費用說明\n• IRI / PCI 判讀方式\n• 系統操作說明\n\n請問有什麼需要幫忙的？');
+    appendChatBubble('ai', '您好！我是東利 AI 助理 🤖\n系統已載入**青埔特區**道路品質數據，可直接提問：\n• 目前最差的路段是哪一條？\n• 100萬預算可以修哪幾段？\n• IRI 超標的路段有幾條？\n• 雙車道同步劣化的路段\n\nPowered by Google Gemini');
   }
 }
 
@@ -6688,12 +6691,18 @@ function sendChatFromInput() {
 }
 
 function getChatContext() {
-  if (!window.segments || segments.length === 0) {
-    // 自動載入內建青埔資料
-    if (typeof BUNDLED_CSV_TEXT !== 'undefined' && BUNDLED_CSV_TEXT) {
-      loadBundledCSV();
-    }
-    if (!window.segments || segments.length === 0) {
+  if (!segments || segments.length === 0) {
+    // 自動解析內建青埔資料（不觸發 UI 更新，避免在聊天情境下拋錯）
+    try {
+      if (typeof BUNDLED_CSV_TEXT !== 'undefined' && BUNDLED_CSV_TEXT) {
+        const parsed = parseCSVPiles(BUNDLED_CSV_TEXT);
+        if (parsed && parsed.length > 0) {
+          piles = parsed;
+          segments = analyzePiles(piles);
+        }
+      }
+    } catch(e) {}
+    if (!segments || segments.length === 0) {
       return '\n\n（目前尚未載入任何路段資料，請先在「資料輸入」頁面上傳 CSV 檔案。）';
     }
   }
