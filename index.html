@@ -311,6 +311,7 @@ PCI: 58"></textarea>
     </div>
     <!-- AI 回覆區 -->
     <div id="aiResponse" style="display:none" class="mt-3 p-3 rounded" style="background:#f8f9fa;font-size:.85rem;"></div>
+    <div id="claudePromptArea" style="display:none" class="mt-2"></div>
   </div>
 
   <!-- 分析結果 -->
@@ -6138,6 +6139,10 @@ async function doAnalyze() {
   const filtered = filterAndSort(segments, query);
   renderResults(filtered);
 
+  // 重置 Claude 提示詞區
+  const promptAreaReset = document.getElementById('claudePromptArea');
+  if (promptAreaReset) promptAreaReset.style.display = 'none';
+
   // Switch to query tab
   const tab = new bootstrap.Tab(document.querySelector('[data-bs-target="#tab-query"]'));
   tab.show();
@@ -6194,6 +6199,91 @@ async function doAnalyze() {
       aiBox.innerHTML = buildBasicSummary();
     }
   }
+
+  // 顯示 Claude 深度分析提示詞區
+  if (filtered.length) {
+    const promptArea = document.getElementById('claudePromptArea');
+    promptArea.style.display = '';
+    promptArea.innerHTML = `
+      <div style="background:#f0f4ff;border:1px solid #c7d4f5;border-radius:8px;padding:10px 14px;font-size:.8rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <strong style="color:#1a3a6b">🤖 Claude 深度分析</strong>
+            <span style="color:#555;margin-left:8px;">複製提示詞 → 貼到 Claude.ai 取得完整養護評估報告</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="copyClaudePrompt()" class="btn btn-sm btn-primary" style="font-size:.78rem;">
+              <i class="fa fa-copy me-1"></i>複製提示詞
+            </button>
+            <a href="https://claude.ai" target="_blank" class="btn btn-sm btn-outline-secondary" style="font-size:.78rem;">
+              開啟 Claude.ai <i class="fa fa-external-link ms-1"></i>
+            </a>
+          </div>
+        </div>
+      </div>`;
+  }
+}
+
+function buildClaudePrompt(segs, totalCost) {
+  const cfg = getConfig();
+  const today = new Date().toLocaleDateString('zh-TW', { year:'numeric', month:'long', day:'numeric' });
+  const top5 = segs.slice(0, 5);
+
+  const segLines = top5.map((s, i) => {
+    const sev = getSeverity(s, cfg);
+    return `${i+1}. 路段：${s.roadName}${s.direction && s.direction !== '—' ? ' '+s.direction : ''}${s.project ? ' ['+s.project+']' : ''}
+   車道：${s.allLanes.join('+')} ｜ 里程：${s.startPos}～${s.endPos}m（長${s.length}m）
+   IRI：${s.maxIRI.toFixed(2)}（閾值${cfg.iriThreshold}）｜ PCI：${s.minPCI}（閾值${cfg.pciThreshold}）
+   嚴重程度：${sev.label} ｜ 建議工法：${s.costInfo.method.method}
+   概估費用：${(s.costInfo.total/10000).toFixed(1)}萬元`;
+  }).join('\n\n');
+
+  return `你是一位擁有20年經驗的道路養護工程師，請根據以下IRI/PCI路況檢測數據，產出一份正式的【道路養護評估報告】，使用繁體中文，報告需具備專業性且可直接提交給主管機關參考。
+
+【本次分析概覽】
+檢測日期：${today}
+劣化路段總數：${segs.length} 段
+概估修繕總費：${(totalCost/10000).toFixed(1)} 萬元
+
+【各路段詳細數據（依優先順序排列）】
+${segLines}${segs.length > 5 ? `\n\n（另有 ${segs.length - 5} 段次要劣化路段，未列入本提示詞）` : ''}
+
+【請依以下格式產出完整報告】
+
+## 一、路況評估總覽
+（整體路況說明：劣化段數、嚴重程度分布、總費用分析）
+
+## 二、優先修繕路段說明
+（逐段說明前3名路段，需引用IRI/PCI數值，說明損壞成因及工法選擇依據，並援引相關規範）
+
+## 三、預算分配建議
+（如何在有限預算內最大化效益，是否有可合併施工的路段）
+
+## 四、施工時程建議
+（考量交通衝擊，建議施工優先順序與適合施工時段）
+
+## 五、結論
+（整體建議摘要與後續追蹤事項）`;
+}
+
+function copyClaudePrompt() {
+  if (!segments || !segments.length) return;
+  const totalCost = segments.reduce((s, x) => s + (x.costInfo?.total||0), 0);
+  const prompt = buildClaudePrompt(segments, totalCost);
+  navigator.clipboard.writeText(prompt).then(() => {
+    showToast('提示詞已複製！請開啟 Claude.ai 貼上', 'success');
+  }).catch(() => {
+    // fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = prompt;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('提示詞已複製！請開啟 Claude.ai 貼上', 'success');
+  });
 }
 
 function switchToQuery() {
