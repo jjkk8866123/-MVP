@@ -133,7 +133,7 @@ body { background:#f0f2f7; font-family:'Microsoft JhengHei',Arial,sans-serif; fo
 </div>
 
 <!-- Tabs -->
-<div id="aiStatBanner" style="display:none;background:linear-gradient(90deg,#1a237e,#283593);color:#fff;padding:7px 18px;font-size:.8rem;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+<div id="aiStatBanner" style="display:none;background:linear-gradient(90deg,#1a237e,#283593);color:#fff;padding:7px 18px;font-size:.8rem;align-items:center;gap:16px;flex-wrap:wrap;">
   <span style="opacity:.8;font-size:.72rem;letter-spacing:1px;">🤖 AI 分析完成</span>
   <span id="bannerName" style="font-weight:700"></span>
   <span>｜ 劣化路段 <strong id="bannerSegs" style="color:#ffcc02"></strong> 段</span>
@@ -6811,7 +6811,7 @@ async function sendChatMsg(userMsg) {
 - 顏色：綠=IRI≤4.2且PCI≥70（正常）、黃=單超標、紫紅=雙超標。
 - 工法：薄層加鋪（輕度）、銑鋪5cm（中度）、路基改善加銑鋪（重度）、坑洞填補（緊急）。
 - 保固期：刨鋪路段有5年保固，期內應向承包商申請維修。
-請用繁體中文，語氣專業親切，每次約100-200字。${getChatContext()}`;
+請用繁體中文，語氣專業親切，回答完整詳細，涉及路段排名或預算分析時請列出具體數字與路段名稱。${getChatContext()}`;
 
   // 建立 contents 陣列（含歷史）
   const contents = [];
@@ -6828,7 +6828,7 @@ async function sendChatMsg(userMsg) {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${key}`,
       { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ contents, generationConfig:{ maxOutputTokens:512, temperature:0.5 } }) }
+        body: JSON.stringify({ contents, generationConfig:{ maxOutputTokens:2048, temperature:0.5 } }) }
     );
     const data = await res.json();
     if (data.error) {
