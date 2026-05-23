@@ -6852,14 +6852,12 @@ function sendChatFromInput() {
 // ===========================================================
 const PRESET_ANSWERS = {
 
+  // ── 1. 最差路段：單一最嚴重路段，完整決策資訊 ──
   '最差路段': () => {
     if (!segments.length) return null;
     const cfg = getConfig();
-    const sorted = [...segments].sort((a,b) => {
-      const sc = s => (s.maxIRI > cfg.iriThreshold ? 2:0) + (s.minPCI < cfg.pciThreshold ? 2:0);
-      if (sc(b) !== sc(a)) return sc(b) - sc(a);
-      return (b.maxIRI||0) - (a.maxIRI||0);
-    });
+    const sc  = s => (s.maxIRI > cfg.iriThreshold ? 2:0) + (s.minPCI < cfg.pciThreshold ? 2:0);
+    const sorted = [...segments].sort((a,b) => sc(b)-sc(a) || (b.maxIRI||0)-(a.maxIRI||0));
     const s = sorted[0];
     const dual   = s.maxIRI > cfg.iriThreshold && s.minPCI < cfg.pciThreshold;
     const iriX   = (s.maxIRI / cfg.iriThreshold).toFixed(1);
@@ -6871,53 +6869,142 @@ const PRESET_ANSWERS = {
 
 • IRI：**${s.maxIRI.toFixed(2)}**（容許值 ${cfg.iriThreshold}，超標 **${iriX} 倍**）
 • PCI：**${s.minPCI}**（容許值 ${cfg.pciThreshold}${s.minPCI < cfg.pciThreshold ? '，路面破損超標' : '，尚在標準內'}）
-• 狀態：${dual ? '⚠ 雙指標同步超標，最優先處理' : 'IRI 單超標'}
+• 狀態：${dual ? '⚠ 雙指標同步超標，最優先處理' : 'IRI 單超標，平整度不良'}
 • 建議工法：${method}
 • 概估費用：**${cost}**`;
   },
 
-  '雙超標路段': () => {
+  // ── 2. 連續最長：同一路名中，找出連續相鄰的最長劣化鏈 ──
+  '連續最長': () => {
+    if (!segments.length) return null;
+    // 依路名分組，各組按起點排序後找連續鏈（間距 ≤20m 視為相鄰）
+    const byRoad = {};
+    segments.forEach(s => {
+      const k = s.roadName + '|' + (s.direction||'');
+      if (!byRoad[k]) byRoad[k] = [];
+      byRoad[k].push(s);
+    });
+    let best = null;
+    Object.values(byRoad).forEach(segs => {
+      const sorted = [...segs].sort((a,b) => a.startPos - b.startPos);
+      let chain = [sorted[0]];
+      const commit = () => {
+        const len  = chain.reduce((s,x) => s+((x.endPos||0)-(x.startPos||0)), 0);
+        const cost = chain.reduce((s,x) => s+(x.costInfo?.total||0), 0);
+        if (!best || len > best.len)
+          best = { name: chain[0].roadName, dir: chain[0].direction,
+                   start: chain[0].startPos, end: chain[chain.length-1].endPos,
+                   count: chain.length, len, cost };
+      };
+      for (let i=1; i<sorted.length; i++) {
+        if (sorted[i].startPos <= sorted[i-1].endPos + 20) chain.push(sorted[i]);
+        else { commit(); chain = [sorted[i]]; }
+      }
+      commit();
+    });
+    if (!best) return null;
+    const dir = best.dir && best.dir !== '—' ? ' '+best.dir : '';
+    return `**連續劣化最長路段：${best.name}${dir}**
+樁位 ${best.start}～${best.end}m，共 **${best.len}m** 連續劣化（${best.count} 段相鄰）
+
+概估修繕費用：**${(best.cost/10000).toFixed(0)} 萬元**
+
+此路段劣化範圍連續，建議**合併一次發包**，可降低動員成本，並避免分批施工反覆封路影響交通。`;
+  },
+
+  // ── 3. 雙車道劣化：同樁位多車道同時劣化，需全幅修繕 ──
+  '雙車道劣化': () => {
+    if (!segments.length) return null;
+    const multi = [...segments]
+      .filter(s => s.allLanes && s.allLanes.length > 1)
+      .sort((a,b) => b.allLanes.length - a.allLanes.length || (b.maxIRI||0)-(a.maxIRI||0));
+    if (!multi.length) return '目前資料中**無多車道同步劣化**路段（每段僅有單一車道超標）。';
+    const lines = multi.slice(0,6).map((s,i) => {
+      const cost = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　車道 ${s.allLanes.join('+')}（${s.allLanes.length} 線同步劣化）　IRI ${s.maxIRI?.toFixed(2)}　${cost}`;
+    }).join('\n');
+    const total = multi.reduce((s,x) => s+(x.costInfo?.total||0), 0);
+    return `多車道同步劣化共 **${multi.length} 段**，路面全幅受損，需整幅修繕：\n\n${lines}${multi.length>6 ? `\n（另有 ${multi.length-6} 段省略）`:''}\n\n合計概估：**${(total/10000).toFixed(0)} 萬元**\n\n全幅劣化路段若分車道修繕，接縫處易快速再劣化，建議一次整幅施工。`;
+  },
+
+  // ── 4. IRI超標：平整度不良，以顛簸程度排序 ──
+  'IRI超標': () => {
     if (!segments.length) return null;
     const cfg  = getConfig();
-    const dual = [...segments]
-      .filter(s => s.maxIRI > cfg.iriThreshold && s.minPCI < cfg.pciThreshold)
+    const over = [...segments]
+      .filter(s => s.maxIRI > cfg.iriThreshold)
       .sort((a,b) => (b.maxIRI||0)-(a.maxIRI||0));
-    if (!dual.length) return '目前資料中**無雙指標同步超標**路段。';
-    const lines = dual.map((s,i) => {
+    if (!over.length) return `所有路段 IRI 均在容許值（${cfg.iriThreshold}）以下，平整度良好。`;
+    const lines = over.slice(0,5).map((s,i) => {
+      const x    = (s.maxIRI/cfg.iriThreshold).toFixed(1);
       const cost = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
-      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　IRI ${s.maxIRI.toFixed(2)}｜PCI ${s.minPCI}｜${cost}`;
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　IRI **${s.maxIRI.toFixed(2)}**（超標 ${x} 倍）　${cost}`;
     }).join('\n');
-    const total = dual.reduce((s,x) => s+(x.costInfo?.total||0), 0);
-    return `雙指標同步超標共 **${dual.length} 段**（IRI 和 PCI 同時超標，最優先修繕）：\n\n${lines}\n\n合計概估：**${(total/10000).toFixed(0)} 萬元**`;
+    const total = over.reduce((s,x) => s+(x.costInfo?.total||0), 0);
+    return `IRI 平整度超標共 **${over.length} 段**（容許值 ${cfg.iriThreshold}），路面顛簸影響行車舒適與安全：\n\n${lines}${over.length>5 ? `\n（另有 ${over.length-5} 段省略）`:''}\n\n合計概估修繕：**${(total/10000).toFixed(0)} 萬元**`;
   },
 
-  '500萬能修哪些': () => {
+  // ── 5. PCI最低：路面結構破損最嚴重，以破損程度排序 ──
+  'PCI最低': () => {
     if (!segments.length) return null;
-    const plan = calcBudgetPlan(5000000, segments);
-    if (!plan.selected.length) return '500萬預算不足以修繕任何路段。';
-    const lines = plan.selected.map((s,i) => {
+    const cfg = getConfig();
+    const low = [...segments]
+      .filter(s => s.minPCI < cfg.pciThreshold)
+      .sort((a,b) => (a.minPCI??100)-(b.minPCI??100));
+    if (!low.length) return `所有路段 PCI 均在容許值（${cfg.pciThreshold}）以上，路面結構狀況良好。`;
+    const lines = low.slice(0,5).map((s,i) => {
       const cost = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
-      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　${cost}`;
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　PCI **${s.minPCI}**（容許值 ${cfg.pciThreshold}）　${cost}`;
     }).join('\n');
-    const pct  = Math.round(plan.used/5000000*100);
-    const skip = plan.skipped.length ? `\n\n另有 **${plan.skipped.length} 段**因預算不足跳過。` : '';
-    return `500萬預算可納入 **${plan.selected.length} 段**路段修繕：\n\n${lines}\n\n使用 **${(plan.used/10000).toFixed(1)} 萬元**（${pct}%），剩餘 ${(plan.remaining/10000).toFixed(1)} 萬元${skip}`;
+    const total = low.reduce((s,x) => s+(x.costInfo?.total||0), 0);
+    return `PCI 結構超標共 **${low.length} 段**（低於容許值 ${cfg.pciThreshold}），路面龜裂或坑洞影響結構安全：\n\n${lines}${low.length>5 ? `\n（另有 ${low.length-5} 段省略）`:''}\n\n合計概估修繕：**${(total/10000).toFixed(0)} 萬元**`;
   },
 
-  '保固快到期': () => {
+  // ── 6. 緊急修復：短路段（≤60m）+ 嚴重超標，小工班快速進場 ──
+  '緊急修復': () => {
     if (!segments.length) return null;
-    try {
-      const wa = typeof getWarrantyAreas === 'function' ? getWarrantyAreas() : [];
-      if (!wa.length) return '目前尚未設定保固範圍資料。\n請在「保固管理」頁面匯入保固資料後再查詢。';
-      const inW = segments.filter(s => typeof isSegInWarranty === 'function' && isSegInWarranty(s));
-      if (!inW.length) return '目前劣化路段中，**無路段位於保固範圍內**。';
-      const lines = inW.map(s =>
-        `• **${s.roadName}** 樁位${s.startPos}～${s.endPos}m — 應向原承包商申請保固維修`
-      ).join('\n');
-      return `以下 **${inW.length} 段**劣化路段位於保固範圍內，**不需動用養護預算**：\n\n${lines}\n\n建議優先發函要求承包商限期改善。`;
-    } catch(e) {
-      return '保固查詢發生錯誤，請確認保固資料已正確載入。';
-    }
+    const cfg = getConfig();
+    const urgent = [...segments].filter(s => {
+      const len    = (s.endPos||0) - (s.startPos||0);
+      const badPCI = s.minPCI < 40;                         // 路面嚴重破損
+      const highIRI= s.maxIRI > cfg.iriThreshold * 1.8;    // IRI 嚴重超標
+      return len <= 60 && (badPCI || highIRI);              // 短路段且情況嚴重
+    }).sort((a,b) => {
+      // PCI 越低越緊急；相同時，路段越短越容易快修
+      if (a.minPCI !== b.minPCI) return (a.minPCI??100)-(b.minPCI??100);
+      return ((a.endPos||0)-(a.startPos||0)) - ((b.endPos||0)-(b.startPos||0));
+    });
+    if (!urgent.length) return '目前無符合緊急快修條件的路段。\n（條件：路段長度 ≤60m 且 PCI<40 或 IRI 嚴重超標）';
+    const lines = urgent.slice(0,6).map((s,i) => {
+      const len    = (s.endPos||0)-(s.startPos||0);
+      const cost   = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
+      const method = s.costInfo?.method?.method || '—';
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m（**${len}m**）　PCI ${s.minPCI}　${method}　${cost}`;
+    }).join('\n');
+    return `可快速進場修復路段（短路段 + 嚴重超標）共 **${urgent.length} 段**：\n\n${lines}${urgent.length>6 ? `\n（另有 ${urgent.length-6} 段省略）`:''}\n\n這些路段長度短（≤60m），小型工班一日內即可完成，建議優先排程處理。`;
+  },
+
+  // ── 7. 費用排序：最貴 vs 最省，輔助預算分配決策 ──
+  '費用排序': () => {
+    if (!segments.length) return null;
+    const withCost = [...segments]
+      .filter(s => s.costInfo?.total > 0)
+      .sort((a,b) => (b.costInfo.total||0)-(a.costInfo.total||0));
+    if (!withCost.length) return '目前無費用估算資料。';
+    const top = withCost.slice(0,3).map((s,i) => {
+      const cost   = `${(s.costInfo.total/10000).toFixed(1)} 萬`;
+      const method = s.costInfo.method?.method || '—';
+      const len    = (s.endPos||0)-(s.startPos||0);
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m（${len}m）　**${cost}**　${method}`;
+    }).join('\n');
+    const bot = [...withCost].reverse().slice(0,3).map((s,i) => {
+      const cost   = `${(s.costInfo.total/10000).toFixed(1)} 萬`;
+      const method = s.costInfo.method?.method || '—';
+      const len    = (s.endPos||0)-(s.startPos||0);
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m（${len}m）　**${cost}**　${method}`;
+    }).join('\n');
+    const total = withCost.reduce((s,x)=>s+(x.costInfo?.total||0),0);
+    return `**費用最高（需提前規劃或申請專案預算）：**\n${top}\n\n**費用最低（小額預算可優先處理）：**\n${bot}\n\n全部 ${withCost.length} 段合計：**${(total/10000).toFixed(0)} 萬元**`;
   }
 };
 
@@ -7099,10 +7186,13 @@ async function sendChatMsg(userMsg) {
     <button onclick="toggleChat()" style="background:none;border:none;color:#fff;font-size:1.1rem">✕</button>
   </div>
   <div id="aiChatQuick">
-    <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('最差路段','目前最差的路段是哪條？')">最差路段</button>
-    <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('雙超標路段','雙指標同步超標的路段有哪些？')">雙超標路段</button>
-    <button class="btn btn-sm btn-outline-success py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('500萬能修哪些','500萬預算可以修哪些路段？')">500萬能修哪些</button>
-    <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('保固快到期','保固快到期的路段有哪些？')">保固快到期</button>
+    <button class="btn btn-sm btn-outline-danger  py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('最差路段',  '目前最差的路段是哪條？')">⚠ 最差路段</button>
+    <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('連續最長',  '哪條路的連續劣化範圍最長？')">📏 連續最長</button>
+    <button class="btn btn-sm btn-outline-primary  py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('雙車道劣化','有哪些路段多車道同步劣化？')">🚗 雙車道劣化</button>
+    <button class="btn btn-sm btn-outline-warning  py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('IRI超標',   'IRI 超標的路段有哪些？')">📈 IRI超標</button>
+    <button class="btn btn-sm btn-outline-info     py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('PCI最低',   'PCI 最低的路段有哪些？')">📉 PCI最低</button>
+    <button class="btn btn-sm btn-outline-danger   py-0 px-2" style="font-size:.7rem;background:#fff0f0" onclick="sendPresetMsg('緊急修復',  '哪些路段適合緊急快修？')">🔴 緊急修復</button>
+    <button class="btn btn-sm btn-outline-success  py-0 px-2" style="font-size:.7rem" onclick="sendPresetMsg('費用排序',  '修繕費用最高和最低的是哪些？')">💰 費用排序</button>
   </div>
   <div id="aiChatMsgs"></div>
   <div id="aiChatInputRow">
