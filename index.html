@@ -6421,11 +6421,10 @@ ${skippedLines}
   3. 影響說明：路面損壞對行車安全或用路品質的具體影響（一句話即可，不需重複數字）
 
 **三、工法選擇與經費規劃**
-【格式】依工法類別分組說明，每種工法為一小段，格式如下：
-  ・工法名稱（例：銑鋪5公分）：說明適用情境（哪類損壞適合此工法）→ 列出採用此工法的路段名稱 → 各段費用 → 小計
-  ・工法名稱（例：路基改善加銑鋪）：同上格式
-  最後一行：全案合計金額與預算執行率。
-  若有保固路段，單獨說明保固申請事宜。
+【格式】依工法類別分組，每種工法為一小段，內容包含：
+  ・工法名稱：說明適用情境（哪類損壞適合）→ 採用路段數量 → 費用區間（最低～最高萬元）→ 小計
+  ・可挑1～2個代表性路段舉例說明，不需逐段列舉所有路段名稱
+  最後說明全案合計金額與預算執行率。若有保固路段，單獨說明保固申請事宜。
 
 **四、後續建議**（約120字）
 分兩部分：
@@ -6815,7 +6814,7 @@ function toggleChat() {
   panel.classList.toggle('hidden', !chatOpen);
   document.getElementById('aiChatBadge').style.display = 'none';
   if (chatOpen && document.getElementById('aiChatMsgs').children.length === 0) {
-    appendChatBubble('ai', '您好！我是東利 AI 助理 🤖\n系統已載入**青埔特區**道路品質數據，可直接提問：\n• 目前最差的路段是哪一條？\n• 100萬預算可以修哪幾段？\n• IRI 超標的路段有幾條？\n• 雙車道同步劣化的路段\n\nPowered by Google Gemini');
+    appendChatBubble('ai', '系統已載入**青埔特區**道路品質數據，可直接提問：\n• 最差的路段是哪條？要多少錢修？\n• 雙指標同步超標有哪些路段？\n• 500萬預算可以修哪幾條？\n• 保固快到期的路段怎麼處理？\n\nPowered by Google Gemini');
   }
 }
 
@@ -6846,6 +6845,102 @@ function sendChatFromInput() {
   if (!msg) return;
   inp.value = '';
   sendChatMsg(msg);
+}
+
+// ===========================================================
+// 預設主題快速回答（不呼叫 Gemini，直接從資料計算）
+// ===========================================================
+const PRESET_ANSWERS = {
+
+  '最差路段': () => {
+    if (!segments.length) return null;
+    const cfg = getConfig();
+    const sorted = [...segments].sort((a,b) => {
+      const sc = s => (s.maxIRI > cfg.iriThreshold ? 2:0) + (s.minPCI < cfg.pciThreshold ? 2:0);
+      if (sc(b) !== sc(a)) return sc(b) - sc(a);
+      return (b.maxIRI||0) - (a.maxIRI||0);
+    });
+    const s = sorted[0];
+    const dual   = s.maxIRI > cfg.iriThreshold && s.minPCI < cfg.pciThreshold;
+    const iriX   = (s.maxIRI / cfg.iriThreshold).toFixed(1);
+    const cost   = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬元` : '未估';
+    const method = s.costInfo?.method?.method || '—';
+    const dir    = s.direction && s.direction !== '—' ? ' '+s.direction : '';
+    return `**目前最差路段：${s.roadName}${dir}**
+樁位 ${s.startPos}～${s.endPos}m　車道 ${s.allLanes.join('+')}
+
+• IRI：**${s.maxIRI.toFixed(2)}**（容許值 ${cfg.iriThreshold}，超標 **${iriX} 倍**）
+• PCI：**${s.minPCI}**（容許值 ${cfg.pciThreshold}${s.minPCI < cfg.pciThreshold ? '，路面破損超標' : '，尚在標準內'}）
+• 狀態：${dual ? '⚠ 雙指標同步超標，最優先處理' : 'IRI 單超標'}
+• 建議工法：${method}
+• 概估費用：**${cost}**`;
+  },
+
+  '雙超標路段': () => {
+    if (!segments.length) return null;
+    const cfg  = getConfig();
+    const dual = [...segments]
+      .filter(s => s.maxIRI > cfg.iriThreshold && s.minPCI < cfg.pciThreshold)
+      .sort((a,b) => (b.maxIRI||0)-(a.maxIRI||0));
+    if (!dual.length) return '目前資料中**無雙指標同步超標**路段。';
+    const lines = dual.map((s,i) => {
+      const cost = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　IRI ${s.maxIRI.toFixed(2)}｜PCI ${s.minPCI}｜${cost}`;
+    }).join('\n');
+    const total = dual.reduce((s,x) => s+(x.costInfo?.total||0), 0);
+    return `雙指標同步超標共 **${dual.length} 段**（IRI 和 PCI 同時超標，最優先修繕）：\n\n${lines}\n\n合計概估：**${(total/10000).toFixed(0)} 萬元**`;
+  },
+
+  '500萬能修哪些': () => {
+    if (!segments.length) return null;
+    const plan = calcBudgetPlan(5000000, segments);
+    if (!plan.selected.length) return '500萬預算不足以修繕任何路段。';
+    const lines = plan.selected.map((s,i) => {
+      const cost = s.costInfo ? `${(s.costInfo.total/10000).toFixed(1)} 萬` : '未估';
+      return `${i+1}. **${s.roadName}** 樁位${s.startPos}～${s.endPos}m　${cost}`;
+    }).join('\n');
+    const pct  = Math.round(plan.used/5000000*100);
+    const skip = plan.skipped.length ? `\n\n另有 **${plan.skipped.length} 段**因預算不足跳過。` : '';
+    return `500萬預算可納入 **${plan.selected.length} 段**路段修繕：\n\n${lines}\n\n使用 **${(plan.used/10000).toFixed(1)} 萬元**（${pct}%），剩餘 ${(plan.remaining/10000).toFixed(1)} 萬元${skip}`;
+  },
+
+  '保固快到期': () => {
+    if (!segments.length) return null;
+    try {
+      const wa = typeof getWarrantyAreas === 'function' ? getWarrantyAreas() : [];
+      if (!wa.length) return '目前尚未設定保固範圍資料。\n請在「保固管理」頁面匯入保固資料後再查詢。';
+      const inW = segments.filter(s => typeof isSegInWarranty === 'function' && isSegInWarranty(s));
+      if (!inW.length) return '目前劣化路段中，**無路段位於保固範圍內**。';
+      const lines = inW.map(s =>
+        `• **${s.roadName}** 樁位${s.startPos}～${s.endPos}m — 應向原承包商申請保固維修`
+      ).join('\n');
+      return `以下 **${inW.length} 段**劣化路段位於保固範圍內，**不需動用養護預算**：\n\n${lines}\n\n建議優先發函要求承包商限期改善。`;
+    } catch(e) {
+      return '保固查詢發生錯誤，請確認保固資料已正確載入。';
+    }
+  }
+};
+
+function sendPresetMsg(key, displayText) {
+  if (!chatOpen) toggleChat();
+  appendChatBubble('user', displayText);
+
+  const generator = PRESET_ANSWERS[key];
+  if (!generator) { sendChatMsg(displayText); return; }
+
+  const bubble = appendChatBubble('ai', '⏳ 分析中...');
+  setTimeout(() => {
+    const result = generator();
+    if (!result) {
+      bubble.innerHTML = '<span class="ai-icon">🤖</span>資料尚未載入，請先上傳 CSV 檔案。';
+      return;
+    }
+    bubble.innerHTML = '<span class="ai-icon">🤖</span>' +
+      result.replace(/\*\*(.*?)\*\*/g,'<b>$1</b>').replace(/\*\*([^*]+)$/g,'<b>$1</b>').replace(/\n/g,'<br>');
+    // 加入歷史，讓後續 Gemini 提問有上下文
+    chatHistory.push({ role:'user',  parts:[{ text: displayText }] });
+    chatHistory.push({ role:'model', parts:[{ text: result }] });
+  }, 350);
 }
 
 function getChatContext() {
@@ -6928,14 +7023,22 @@ async function sendChatMsg(userMsg) {
 
   const loadingBubble = appendChatBubble('ai', '⏳ 思考中...');
 
-  const systemText = `你是東利工程的道路品質分析助理，負責輔助工程人員了解道路維護決策。
+  const systemText = `你是一位道路養護工程顧問，協助工程人員分析道路品質數據並提供決策建議。
 背景知識：
-- IRI（國際粗糙度指數）：越高越不平整，門檻 4.2，超過視為異常。
-- PCI（路面狀況指數）：0-100，越低越差，門檻 70，低於視為異常。
-- 顏色：綠=IRI≤4.2且PCI≥70（正常）、黃=單超標、紫紅=雙超標。
-- 工法：薄層加鋪（輕度）、銑鋪5cm（中度）、路基改善加銑鋪（重度）、坑洞填補（緊急）。
-- 保固期：刨鋪路段有5年保固，期內應向承包商申請維修。
-請用繁體中文，直接回答，不需要自我介紹或客套開場白。涉及路段排名請列出路名與數值，涉及預算請逐條列出修繕路段與費用，回答務必完整涵蓋使用者所有提問。${getChatContext()}`;
+- IRI（國際粗糙度指數）：越高路面越顛簸，門檻 ${getConfig().iriThreshold ?? 4.2}，超標需修繕。
+- PCI（路面狀況指數）：0～100，越低破損越嚴重，門檻 ${getConfig().pciThreshold ?? 70}，低於需修繕。
+- 雙超標：IRI 和 PCI 同時超標，最優先處理。單超標：其中一項超標，次優先。
+- 工法：薄層加鋪（輕度劣化）、銑鋪5cm（中度）、路基改善加銑鋪（重度雙超標）、坑洞填補（緊急）。
+- 保固：刨鋪路段有5年保固，期內損壞應向原承包商申請維修，不需動用預算。
+
+回答格式規範（依問題類型）：
+1. 查詢最差路段 → 路名 ＋ IRI/PCI數值 ＋ 超標幅度（如「超標2.3倍」）＋ 概估費用 ＋ 一句行動建議
+2. 預算試算 → 列出能納入的路段清單（路名 ＋ 費用），說明合計使用多少、預算剩餘多少
+3. 路段排名 → 前5名逐條說明，其餘說明總數量即可
+4. 保固查詢 → 路名 ＋ 保固到期日 ＋ 目前狀況 ＋ 建議行動
+5. 費用一律換算萬元（如「3,062萬元」），不要用元
+
+請用繁體中文，直接回答，不需要任何開場白。${getChatContext()}`;
 
   // 建立 contents 陣列（含歷史）
   const contents = [];
@@ -6996,9 +7099,10 @@ async function sendChatMsg(userMsg) {
     <button onclick="toggleChat()" style="background:none;border:none;color:#fff;font-size:1.1rem">✕</button>
   </div>
   <div id="aiChatQuick">
-    <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('目前最差路段？')">最差路段？</button>
-    <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('保固期快到的路段有哪些？')">保固到期？</button>
-    <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.72rem" onclick="sendChatMsg('這個系統怎麼使用？')">系統說明</button>
+    <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('最差路段','目前最差的路段是哪條？')">最差路段</button>
+    <button class="btn btn-sm btn-outline-primary py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('雙超標路段','雙指標同步超標的路段有哪些？')">雙超標路段</button>
+    <button class="btn btn-sm btn-outline-success py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('500萬能修哪些','500萬預算可以修哪些路段？')">500萬能修哪些</button>
+    <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:.72rem" onclick="sendPresetMsg('保固快到期','保固快到期的路段有哪些？')">保固快到期</button>
   </div>
   <div id="aiChatMsgs"></div>
   <div id="aiChatInputRow">
