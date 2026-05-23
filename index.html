@@ -6344,61 +6344,83 @@ function copyBudgetClaudePrompt() {
     showToast('沒有可納入修繕的路段', 'warning'); return;
   }
 
-  const cfg  = getConfig();
+  const cfg   = getConfig();
   const today = new Date().toLocaleDateString('zh-TW', { year:'numeric', month:'long', day:'numeric' });
-  const pct  = Math.round(plan.used / budget * 100);
+  const pct   = Math.round(plan.used / budget * 100);
+
+  // 計算路段 GPS 重心（取有效樁位平均）
+  function segCentroid(seg) {
+    const gps = seg.piles.filter(p => p.gpsX && p.gpsY && !isNaN(p.gpsX) && !isNaN(p.gpsY));
+    if (!gps.length) return null;
+    const lat = gps.reduce((s, p) => s + p.gpsY, 0) / gps.length;
+    const lng = gps.reduce((s, p) => s + p.gpsX, 0) / gps.length;
+    return { lat, lng };
+  }
 
   const selectedLines = plan.selected.map((seg, i) => {
     const sev = getSeverity(seg, cfg);
     const inW = isSegInWarranty(seg);
-    return `${i+1}. 路段：${seg.roadName}${seg.direction && seg.direction !== '—' ? ' '+seg.direction : ''}${seg.project ? ' ['+seg.project+']' : ''}
-   車道：${seg.allLanes.join('+')} ｜ 里程：${seg.startPos}～${seg.endPos}m（長${seg.length}m）
-   IRI：${seg.maxIRI.toFixed(2)} ｜ PCI：${seg.minPCI} ｜ 嚴重程度：${sev.label}
-   建議工法：${seg.costInfo.method.method} ｜ 費用：${(seg.costInfo.total/10000).toFixed(1)}萬元${inW ? '（保固期，建議申請保固維修）' : ''}`;
+    const c   = segCentroid(seg);
+    const gpsLine = c
+      ? `位置座標：北緯 ${c.lat.toFixed(5)}°、東經 ${c.lng.toFixed(5)}°\n   地圖連結：https://maps.google.com/?q=${c.lat.toFixed(5)},${c.lng.toFixed(5)}`
+      : `位置座標：（本路段無GPS定位資料）`;
+    return `▍路段 ${i+1}／${plan.selected.length}
+路名：${seg.roadName}${seg.direction && seg.direction !== '—' ? ' '+seg.direction : ''}${seg.project ? '  ['+seg.project+']' : ''}
+里程：${seg.startPos}～${seg.endPos}m（全長${seg.length}m）｜車道：${seg.allLanes.join('+')}
+${gpsLine}
+IRI：${seg.maxIRI.toFixed(2)}（容許值 ${cfg.iriThreshold}）｜PCI：${seg.minPCI}（容許值 ${cfg.pciThreshold}）
+嚴重程度：${sev.label}
+建議工法：${seg.costInfo.method.method}
+費用：${(seg.costInfo.total/10000).toFixed(1)} 萬元${inW ? '  ⚠ 保固期內，應向原承包商申請保固維修' : ''}`;
   }).join('\n\n');
 
   const skippedLines = plan.skipped.length
-    ? plan.skipped.map(s =>
-        `- ${s.roadName}${s.project ? ' ['+s.project+']' : ''} 樁位${s.startPos}～${s.endPos}m（需${(s.costInfo.total/10000).toFixed(1)}萬元）`
-      ).join('\n')
+    ? plan.skipped.map((s, i) => {
+        const sev = getSeverity(s, cfg);
+        return `${i+1}. ${s.roadName}${s.project ? ' ['+s.project+']' : ''}  樁位${s.startPos}～${s.endPos}m（${sev.label}，需 ${(s.costInfo.total/10000).toFixed(1)} 萬元）`;
+      }).join('\n')
     : '（無，預算足以涵蓋所有劣化路段）';
 
   const prompt =
 `你是一位具有20年公共工程養護經驗的資深工程師，請根據下方AI道路品質分析系統產出的預算試算數據，撰寫一份正式的【道路養護施工計畫報告】。
 
 報告對象：機關主管或民意代表
-字數：約500～600字
+字數：約600～800字
 語言：繁體中文，語氣專業且易於理解
-格式：分為四個段落，每段以「一、二、三、四、」數字標題起頭，段落之間空一行
+格式：分為四個段落，每段以粗體數字標題（如「**一、計畫緣起與背景**」）起頭，段落間空一行
 
-━━━ 系統數據 ━━━
+━━━ 系統輸出數據 ━━━
 
-【預算規劃】
+【預算規劃摘要】
 試算日期：${today}
-可用預算：${(budget/10000).toFixed(0)}萬元
-實際使用：${(plan.used/10000).toFixed(1)}萬元（預算執行率${pct}%）
-剩餘預算：${(plan.remaining/10000).toFixed(1)}萬元
-本次納入修繕：${plan.selected.length}段
+可用預算：${(budget/10000).toFixed(0)} 萬元
+實際使用：${(plan.used/10000).toFixed(1)} 萬元（預算執行率 ${pct}%）
+剩餘預算：${(plan.remaining/10000).toFixed(1)} 萬元
+本次納入修繕：${plan.selected.length} 段
 
-【納入修繕路段（依優先順序）】
+【納入修繕路段（各路段資料獨立，依優先順序排列）】
 ${selectedLines}
 
-【預算不足、暫緩路段】
+【預算不足、暫緩路段（依優先順序）】
 ${skippedLines}
 
-━━━ 請依以下四段架構撰寫 ━━━
+━━━ 請依以下四段架構撰寫報告 ━━━
 
-一、計畫緣起與背景
-說明本次計畫的背景：對哪個路網進行AI路況檢測、共偵測到幾處劣化路段、整體修繕需求金額，以及在現有預算限制下本次計畫的範圍與決策依據。
+**一、計畫緣起與背景**
+說明本次計畫背景：對哪個路網進行AI路況檢測、共偵測到幾處劣化路段、整體修繕需求總金額，以及在現有預算限制下本次計畫的範圍與決策依據（如何排定優先序）。
 
-二、修繕路段位置與路況說明
-逐段說明每個納入計畫的路段，需包含：路段名稱與里程位置、量測到的IRI平整度指數及PCI路面狀況指數數值、損壞嚴重程度描述，以及為何該路段需要優先處理（例如對行車安全、用路舒適度的影響）。
+**二、修繕路段位置與路況說明**
+【格式要求】每個路段單獨寫一個小段落，以「（一）路段名稱」為標題。每段需說明：
+  - 該路段的地理位置描述（根據Google Maps座標，用人看得懂的方式描述大概位置，例如「位於高鐵特區北側幹道」、「靠近桃園高鐵站出口」，不要直接列出數字座標）
+  - 里程範圍與路段長度
+  - IRI與PCI數值的意義及超標狀況
+  - 路面損壞對行車安全或用路舒適度的具體影響
 
-三、工法選擇與經費規劃
-說明各路段建議採用的施工工法及選用理由（依照損壞類型與程度）、各段費用、合計使用金額與預算執行率。若有保固路段，說明應向原承包商申請保固維修以節省公帑。
+**三、工法選擇與經費規劃**
+說明各路段建議工法及選用理由（依損壞類型與嚴重程度），列出各段費用、合計金額、預算執行率。若有保固路段，說明應向原承包商申請保固維修以節省公帑。
 
-四、後續建議
-針對本次因預算不足未納入的路段，提出後續處理建議（例如下年度預算編列、申請專案補助等），並依路段損壞程度說明緊迫性排序；最後提出施工注意事項，包括交通維持措施、建議施工時段（避開尖峰或特定節慶）等。`;
+**四、後續建議**
+針對暫緩路段提出後續建議（下年度預算編列、申請專案補助等），依損壞嚴重程度說明緊迫性排序。最後提出施工注意事項（交通維持措施、建議施工時段、避開節慶等）。`;
 
   navigator.clipboard.writeText(prompt).then(() => {
     showToast('預算報告提示詞已複製！請開啟 Claude.ai 貼上', 'success');
